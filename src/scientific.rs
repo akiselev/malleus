@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use resolvent::{Context, ExecutionPlan, SymbolId};
 
 #[cfg(feature = "resolvent")]
-use crate::{CompiledConstraints, ResolventLoweringError, lower_pointwise_plan};
+use crate::{lower_pointwise_plan, CompiledConstraints, ResolventLoweringError};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BindingLayout {
@@ -102,10 +102,19 @@ pub struct PropertyKernelBundle {
 #[derive(Clone, Debug, PartialEq)]
 pub enum PropertyKernelError {
     MissingInput(String),
-    PhysicalBound { input: String, value: f64 },
-    ValidityBound { input: String, value: f64 },
+    PhysicalBound {
+        input: String,
+        value: f64,
+    },
+    ValidityBound {
+        input: String,
+        value: f64,
+    },
     TableShape,
-    ExternalProviderRequired { provider: String, property: String },
+    ExternalProviderRequired {
+        provider: String,
+        property: String,
+    },
 }
 
 impl std::fmt::Display for PropertyKernelError {
@@ -128,7 +137,10 @@ impl std::fmt::Display for PropertyKernelError {
 impl std::error::Error for PropertyKernelError {}
 
 impl PropertyKernelBundle {
-    pub fn evaluate(&self, inputs: &BTreeMap<String, f64>) -> Result<f64, PropertyKernelError> {
+    pub fn evaluate(
+        &self,
+        inputs: &BTreeMap<String, f64>,
+    ) -> Result<f64, PropertyKernelError> {
         for guard in &self.guards {
             let value = *inputs
                 .get(&guard.input)
@@ -299,17 +311,20 @@ mod tests {
 
     #[test]
     fn cross_block_cse_only_reports_shared_values() {
-        let a = KernelBlockId("thermal".into());
-        let b = KernelBlockId("electrical".into());
+        let thermal = KernelBlockId("thermal".into());
+        let electrical = KernelBlockId("electrical".into());
         let deps = BTreeMap::from([
             (
-                a.clone(),
+                thermal.clone(),
                 BTreeSet::from(["sigma(T)".into(), "k(T)".into()]),
             ),
-            (b.clone(), BTreeSet::from(["sigma(T)".into()])),
+            (electrical.clone(), BTreeSet::from(["sigma(T)".into()])),
         ]);
         let shared = shared_evaluations(&deps);
-        assert_eq!(shared.get("sigma(T)"), Some(&vec![a, b]));
+        assert_eq!(
+            shared.get("sigma(T)"),
+            Some(&vec![electrical, thermal])
+        );
         assert!(!shared.contains_key("k(T)"));
     }
 }
