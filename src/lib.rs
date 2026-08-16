@@ -16,6 +16,7 @@ mod opcodes;
 #[cfg(feature = "resolvent")]
 mod resolvent_bridge;
 mod scientific;
+mod scientific_property;
 
 #[cfg(feature = "jit")]
 pub use compiled_newton::CompiledNewtonStep;
@@ -36,6 +37,13 @@ pub use scientific::{
 };
 #[cfg(feature = "resolvent")]
 pub use scientific::{CompiledKernelBundle, lower_kernel_bundle};
+pub use scientific_property::{
+    BranchKernel, CompareKernel, ExprKernel, GridAxisKernel, GridKernel, GuardKernel,
+    PredicateKernel, ScientificPropertyError, ScientificPropertyKernel,
+    ScientificPropertyModelKernel, ValidityPolicyKernel,
+};
+#[cfg(feature = "resolvent")]
+pub use scientific_property::{ScientificPropertyLoweringError, lower_property_definition};
 
 /// When to JIT-compile constraint evaluation.
 #[cfg(feature = "jit")]
