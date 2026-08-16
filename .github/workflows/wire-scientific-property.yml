@@ -1,0 +1,27 @@
+name: wire-scientific-property
+on:
+  push:
+    branches:
+      - agent/r13-r20-wave-a-f
+permissions:
+  contents: write
+jobs:
+  wire:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/r13-r20-wave-a-f
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: python tools/wire_scientific_property.py
+      - run: cargo fmt --all
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm tools/wire_scientific_property.py .github/workflows/wire-scientific-property.yml
+          git add -A
+          git commit -m 'Wire direct Resolvent scientific property lowering'
+          git push origin HEAD:agent/r13-r20-wave-a-f
