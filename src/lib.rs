@@ -6,23 +6,26 @@
 //!
 //! # M1 scope — pure re-homing
 //!
-//! This first slice is a **faithful port** of solverang's `jit/` module into
-//! its own crate, with **NO new capability**. It moves the scalar opcode IR
-//! ([`ConstraintOp`] / [`CompiledConstraints`]) plus the Cranelift JIT codegen
-//! backend ([`JITCompiler`] / [`JITFunction`] / [`CompiledNewtonStep`]) and the
-//! fluent [`OpcodeEmitter`] into malleus, keeping the original tests so the port
-//! is provably faithful.
+//! M1 faithfully moved solverang's former `jit/` module into its own crate:
+//! the scalar opcode IR ([`ConstraintOp`] / [`CompiledConstraints`]), Cranelift
+//! JIT codegen ([`JITCompiler`] / [`JITFunction`] / [`CompiledNewtonStep`]),
+//! and the fluent [`OpcodeEmitter`].
 //!
-//! ## Deferred to later milestones (M2+)
+//! # Scientific-stack boundary
 //!
-//! Explicitly **not** attempted here — these are separate milestones:
+//! With the optional `resolvent` feature, Malleus consumes Resolvent's frozen
+//! execution plans. Resolvent owns mathematical and discrete semantics; Malleus
+//! lowers pointwise scalar physics into executable opcode kernels. Restriction,
+//! basis evaluation, quadrature, and scatter remain explicit field-runtime work
+//! and are never silently collapsed into the scalar JIT.
+//!
+//! ## Later milestones
+//!
 //! - Reverse-mode automatic differentiation.
 //! - E-graph rewriting / equality saturation.
 //! - Revolve checkpointing.
 //! - Non-CPU backends (GPU / WASM / FPGA).
-//! - The numeric-contracts `LinearOperator` generation.
-//! - Rewiring solverang to depend on malleus (malleus is a standalone workspace
-//!   root during build-out; folded into the federation at a later barrier).
+//! - The numerical-contract `LinearOperator` generation.
 //!
 //! # Architecture
 //!
@@ -32,10 +35,13 @@
 //!    to native x86_64/aarch64 code via Cranelift, returning a [`JITFunction`]
 //!    with `evaluate_residuals()` / `evaluate_jacobian()` (and fused / dense
 //!    variants), or a whole-Newton-step [`CompiledNewtonStep`].
+//! 3. **Scientific lowering**: the `resolvent` feature exposes
+//!    [`lower_pointwise_plan`] and [`coverage`] for Resolvent execution plans.
 //!
-//! # Feature flag
+//! # Feature flags
 //!
-//! The JIT lives behind the `jit` feature (default-on), mirroring solverang.
+//! The JIT lives behind the default-on `jit` feature. `resolvent` implies `jit`
+//! and adds the scientific execution-plan adapter.
 //!
 //! # Platform support
 //!
@@ -59,6 +65,8 @@ mod cranelift;
 mod lower;
 #[cfg(feature = "jit")]
 mod opcodes;
+#[cfg(feature = "resolvent")]
+mod resolvent_bridge;
 
 #[cfg(feature = "jit")]
 pub use compiled_newton::CompiledNewtonStep;
@@ -69,6 +77,10 @@ pub use lower::OpcodeEmitter;
 #[cfg(feature = "jit")]
 pub use opcodes::{
     CompiledConstraints, ConstraintOp, HessianEntry, JacobianEntry, Reg, ValidationError,
+};
+#[cfg(feature = "resolvent")]
+pub use resolvent_bridge::{
+    PlanCoverage, ResolventLoweringError, coverage, lower_pointwise_plan,
 };
 
 /// When to JIT-compile constraint evaluation.
