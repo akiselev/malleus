@@ -1,35 +1,33 @@
-# malleus — STATUS
+# Malleus status
 
-## Current (M1)
+Updated: 2026-08-16
+Branch: `agent/r13-r20-wave-a-f`
+Milestone: Waves B-F / R13-R18 local-kernel responsibilities
 
-Faithful CPU JIT: scalar opcode IR (`ConstraintOp` / `CompiledConstraints`) plus
-Cranelift codegen (`JITCompiler` / `JITFunction` / `CompiledNewtonStep`).
+## Current role
 
-- Builds standalone (`cargo test`), 28 tests (12 unit + 16 integration).
-- Compiles with `--no-default-features` (JIT off).
-- `jit` feature is default-on and pulls Cranelift 0.116.
+Malleus compiles finite-precision pointwise/local programs. Resolvent owns scientific and discrete semantics; Sinbad owns field/topology/runtime state; Solverang owns numerical algorithms.
 
-Public surface (crate root): `CompiledConstraints`, `ConstraintOp`,
-`JacobianEntry`, `HessianEntry`, `Reg`, `ValidationError`, `OpcodeEmitter`,
-`JITCompiler`, `JITError`, `JITFunction`, `CompiledNewtonStep`, `JitMode`,
-`JITConfig`, `jit_available`.
+## Implemented on this branch
 
-Consumers:
+- R13: `CompiledKernelBundle` contract for primal/JVP/VJP/parameter-derivative pointwise programs with stable binding layouts.
+- R15: property kernel contract for constants, linear expressions, 1-D tables, explicit validity/physical guards, derivatives, and external-provider boundaries.
+- R16: constitutive-kernel metadata for primal outputs, tangents, parameter derivatives, and stateful/local distinction.
+- R17: element-kernel binding contract exposes field values/gradients, geometry, quadrature weights, properties, and constitutive responses without importing global topology.
+- R18: block identities and cross-block shared-evaluation planning for property/constitutive CSE.
+- Existing R9 direct Resolvent execution-plan lowering remains the scalar compilation path.
 
-- [solverang](https://github.com/akiselev/solverang) — `jit` feature re-exports
-  this crate under `solverang::jit`.
-- [sinbad](https://github.com/akiselev/sinbad) — workspace git dependency.
+## Validation state
 
-## Unsafe
+Local Rust validation is unavailable in the execution sandbox because rustup cannot reach its download service. GitHub Actions must establish format/clippy/test status. Do not consider this branch verified until CI is green.
 
-`#![deny(unsafe_op_in_unsafe_fn)]`. Unsafe is only the JIT call boundary and the
-code-pointer transmutes that mint function pointers (`cranelift.rs`,
-`compiled_newton.rs`). Each site has a `// SAFETY:` comment.
+## Cross-repository contract
 
-## Deferred to M2+
+The final branch must pin the exact passing Resolvent Wave A-F commit. Until that synchronization step, the existing Resolvent R0-R9 pin remains in `Cargo.toml` and the new kernel-contract module deliberately depends only on already-stable execution-plan types.
 
-- Reverse-mode automatic differentiation
-- E-graph rewriting / equality saturation
-- Revolve checkpointing
-- Non-CPU backends (GPU / WASM / FPGA)
-- numeric-contracts `LinearOperator` generation
+## Next
+
+1. Run/fix CI for this branch.
+2. Update the Resolvent git revision to the final passing Wave A-F commit.
+3. Re-run CI after pin synchronization.
+4. Consume these bundles from Sinbad's generic element/coupled runtime.
