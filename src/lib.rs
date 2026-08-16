@@ -24,10 +24,16 @@ pub use cranelift::{JITCompiler, JITError, JITFunction};
 #[cfg(feature = "jit")]
 pub use lower::OpcodeEmitter;
 #[cfg(feature = "jit")]
-pub use opcodes::{CompiledConstraints, ConstraintOp, HessianEntry, JacobianEntry, Reg, ValidationError};
+pub use opcodes::{
+    CompiledConstraints, ConstraintOp, HessianEntry, JacobianEntry, Reg, ValidationError,
+};
 #[cfg(feature = "resolvent")]
 pub use resolvent_bridge::{PlanCoverage, ResolventLoweringError, coverage, lower_pointwise_plan};
-pub use scientific::{BindingLayout, ConstitutiveKernelContract, ElementKernelContract, GuardPolicy, KernelBlockId, LinearTable, LocalBinding, LocalInputKind, PropertyKernel, PropertyKernelBundle, PropertyKernelError, ValidityGuard, shared_evaluations};
+pub use scientific::{
+    BindingLayout, ConstitutiveKernelContract, ElementKernelContract, GuardPolicy, KernelBlockId,
+    LinearTable, LocalBinding, LocalInputKind, PropertyKernel, PropertyKernelBundle,
+    PropertyKernelError, ValidityGuard, shared_evaluations,
+};
 #[cfg(feature = "resolvent")]
 pub use scientific::{CompiledKernelBundle, lower_kernel_bundle};
 
@@ -54,16 +60,41 @@ pub struct JITConfig {
 #[cfg(feature = "jit")]
 impl Default for JITConfig {
     fn default() -> Self {
-        Self { jit_threshold: 1000, estimated_iterations: 50, max_iterations: 200, tolerance: 1e-8, mode: JitMode::Auto }
+        Self {
+            jit_threshold: 1000,
+            estimated_iterations: 50,
+            max_iterations: 200,
+            tolerance: 1e-8,
+            mode: JitMode::Auto,
+        }
     }
 }
 
 #[cfg(feature = "jit")]
 impl JITConfig {
-    pub fn always_jit() -> Self { Self { mode: JitMode::ForceJit, ..Default::default() } }
-    pub fn always_interpreted() -> Self { Self { mode: JitMode::ForceInterpreted, ..Default::default() } }
-    pub fn for_large_problems() -> Self { Self { jit_threshold: 500, max_iterations: 500, tolerance: 1e-10, ..Default::default() } }
+    pub fn always_jit() -> Self {
+        Self {
+            mode: JitMode::ForceJit,
+            ..Default::default()
+        }
+    }
+    pub fn always_interpreted() -> Self {
+        Self {
+            mode: JitMode::ForceInterpreted,
+            ..Default::default()
+        }
+    }
+    pub fn for_large_problems() -> Self {
+        Self {
+            jit_threshold: 500,
+            max_iterations: 500,
+            tolerance: 1e-10,
+            ..Default::default()
+        }
+    }
 }
 
 #[cfg(feature = "jit")]
-pub fn jit_available() -> bool { cfg!(any(target_arch = "x86_64", target_arch = "aarch64")) }
+pub fn jit_available() -> bool {
+    cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
+}
