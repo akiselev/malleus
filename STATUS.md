@@ -1,8 +1,5 @@
 # malleus — STATUS
 
-Standalone graph-compiler crate. Extracted from Sinbad's former `sinbad-anvil`
-workspace member, which was itself a faithful port of solverang's `jit/` module.
-
 ## Current (M1)
 
 Faithful CPU JIT: scalar opcode IR (`ConstraintOp` / `CompiledConstraints`) plus
