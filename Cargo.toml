@@ -22,7 +22,7 @@ resolvent = ["jit", "dep:resolvent"]
 [dependencies]
 nalgebra = "0.34"
 thiserror = "2.0"
-resolvent = { git = "https://github.com/akiselev/resolvent", rev = "6c341baa89f533ef504574394e906c1d650a614b", optional = true }
+resolvent = { git = "https://github.com/akiselev/resolvent", rev = "6b19709ef9247e47b7759b3239dd73df3202e367", optional = true }
 cranelift = { version = "0.116", optional = true }
 cranelift-jit = { version = "0.116", optional = true }
 cranelift-module = { version = "0.116", optional = true }

@@ -133,24 +133,8 @@ fn lower_expr(
             let x = lower_expr(ctx, *x, bindings, emitter, memo)?;
             emitter.neg(x)
         }
-        ExprNode::Add(xs) => fold(
-            ctx,
-            xs,
-            bindings,
-            emitter,
-            memo,
-            0.0,
-            OpcodeEmitter::add,
-        )?,
-        ExprNode::Mul(xs) => fold(
-            ctx,
-            xs,
-            bindings,
-            emitter,
-            memo,
-            1.0,
-            OpcodeEmitter::mul,
-        )?,
+        ExprNode::Add(xs) => fold(ctx, xs, bindings, emitter, memo, 0.0, OpcodeEmitter::add)?,
+        ExprNode::Mul(xs) => fold(ctx, xs, bindings, emitter, memo, 1.0, OpcodeEmitter::mul)?,
         ExprNode::Div {
             numerator,
             denominator,
@@ -225,9 +209,9 @@ fn lower_apply(
 
 fn literal_f64(lit: &resolvent::ScalarLiteral) -> Result<f64, ResolventLoweringError> {
     Ok(match lit {
-        resolvent::ScalarLiteral::Integer(s) => s.parse().map_err(|_| {
-            ResolventLoweringError::UnsupportedFunction(format!("literal {s}"))
-        })?,
+        resolvent::ScalarLiteral::Integer(s) => s
+            .parse()
+            .map_err(|_| ResolventLoweringError::UnsupportedFunction(format!("literal {s}")))?,
         resolvent::ScalarLiteral::Rational {
             numerator,
             denominator,
