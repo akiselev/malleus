@@ -1,14 +1,12 @@
 //! FC0-FC1 audit boundary for Resolvent variational-form artifacts.
 //!
-//! This module deliberately does not lower a `VariationalFormV2` into a local kernel.
-//! Structured TensorIR/QFunction lowering starts at FC4. The FC0-FC1 contract verifies
-//! the semantic artifact, inventories the local features that future lowering must
-//! support, and exposes the legacy scalar-H1 oracle without confusing it with generated
-//! structured code.
+//! Malleus deliberately does not lower `VariationalFormV2` directly into kernels here.
+//! FC0-FC1 establish the stable semantic boundary, verify its digests and legality, and
+//! inventory the local capabilities later TensorIR/QFunction lowering must provide.
 
 use resolvent::{
-    DerivativeArtifactsV2, Digest, FormExprV2, FormV2Error, MeasureV2, ScalarKindV2,
-    VariationalFormArtifactV2,
+    AdjointKindV2, ArtifactEnvelopeV2, ArtifactIdV2, FormExprV2, MeasureV2, ScalarKindV2,
+    VariationalFormV2,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -49,7 +47,7 @@ pub enum StructuredKernelGenerationV2 {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IntegralKernelAuditV2 {
-    pub id: String,
+    pub label: String,
     pub measure: String,
     pub requirements: Vec<LocalKernelRequirementV2>,
 }
@@ -57,56 +55,60 @@ pub struct IntegralKernelAuditV2 {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VariationalKernelAuditV2 {
     pub schema: String,
-    pub artifact_digest: Digest,
-    pub semantic_digest: Digest,
+    pub artifact_id: ArtifactIdV2,
+    pub semantic_digest: ArtifactIdV2,
     pub scalar_kind: ScalarKindV2,
     pub arity: u16,
     pub integrals: Vec<IntegralKernelAuditV2>,
     pub requirements: Vec<LocalKernelRequirementV2>,
-    pub compatibility_oracle_digest: Option<Digest>,
-    pub derivative_artifacts: DerivativeArtifactsV2,
+    pub derivative_artifacts: usize,
     pub operator_claims: usize,
     pub structured_kernel_generation: StructuredKernelGenerationV2,
     pub assembly_level_in_form_identity: bool,
 }
 
 pub fn audit_variational_form_v2(
-    artifact: &VariationalFormArtifactV2,
+    artifact: &ArtifactEnvelopeV2<VariationalFormV2>,
 ) -> Result<VariationalKernelAuditV2, VariationalAuditError> {
-    artifact.verify().map_err(VariationalAuditError::from_form)?;
+    artifact.verify().map_err(|error| VariationalAuditError::InvalidArtifact {
+        resolvent_code: "FORM-ARTIFACT-001".into(),
+        detail: error.to_string(),
+    })?;
+    artifact
+        .payload
+        .validate()
+        .map_err(|error| VariationalAuditError::InvalidArtifact {
+            resolvent_code: error
+                .diagnostics
+                .first()
+                .map(|diagnostic| diagnostic.code.clone())
+                .unwrap_or_else(|| "FORM-VALIDATION-001".into()),
+            detail: error.to_string(),
+        })?;
 
-    let compatibility_oracle_digest = match artifact.payload.scalar_h1_compatibility.as_ref() {
-        Some(compatibility) => {
-            artifact
-                .scalar_h1_compatibility_program()
-                .map_err(VariationalAuditError::from_form)?;
-            Some(compatibility.source_digest.clone())
-        }
-        None => None,
-    };
+    let semantic_digest = artifact
+        .payload
+        .semantic_digest()
+        .map_err(|error| VariationalAuditError::InvalidArtifact {
+            resolvent_code: "FORM-DIGEST-001".into(),
+            detail: error.to_string(),
+        })?;
 
     let mut all_requirements = BTreeSet::new();
-    if artifact.payload.form.scalar_kind.is_complex() {
+    if artifact.payload.scalar_kind.is_complex() {
         all_requirements.insert(LocalKernelRequirementV2::ComplexArithmetic);
     }
     if artifact
         .payload
-        .form
-        .arguments
+        .spaces
         .iter()
-        .any(|argument| !argument.value_type.axes.is_empty())
-        || artifact
-            .payload
-            .form
-            .coefficients
-            .iter()
-            .any(|coefficient| !coefficient.value_type.axes.is_empty())
+        .any(|space| !space.value_type.axes.is_empty())
     {
         all_requirements.insert(LocalKernelRequirementV2::TensorAxes);
     }
 
-    let mut integrals = Vec::with_capacity(artifact.payload.form.integrals.len());
-    for integral in &artifact.payload.form.integrals {
+    let mut integrals = Vec::with_capacity(artifact.payload.integrals.len());
+    for integral in &artifact.payload.integrals {
         let mut requirements = BTreeSet::new();
         collect_requirements(&integral.integrand, &mut requirements);
         if !matches!(&integral.measure, MeasureV2::Cell { .. }) {
@@ -114,30 +116,40 @@ pub fn audit_variational_form_v2(
         }
         all_requirements.extend(requirements.iter().cloned());
         integrals.push(IntegralKernelAuditV2 {
-            id: integral.id.clone(),
-            measure: integral.measure.kind_name().into(),
+            label: integral.label.clone(),
+            measure: measure_name(&integral.measure).into(),
             requirements: requirements.into_iter().collect(),
         });
     }
-    integrals.sort_by(|left, right| left.id.cmp(&right.id));
+    integrals.sort_by(|left, right| left.label.cmp(&right.label));
 
     Ok(VariationalKernelAuditV2 {
         schema: MALLEUS_FORM_AUDIT_V2_SCHEMA.into(),
-        artifact_digest: artifact.artifact_digest.clone(),
-        semantic_digest: artifact.semantic_digest.clone(),
-        scalar_kind: artifact.payload.form.scalar_kind,
-        arity: artifact.payload.form.arity(),
+        artifact_id: artifact.artifact_id.clone(),
+        semantic_digest,
+        scalar_kind: artifact.payload.scalar_kind,
+        arity: artifact.payload.arity(),
         integrals,
         requirements: all_requirements.into_iter().collect(),
-        compatibility_oracle_digest,
-        derivative_artifacts: artifact.payload.derivatives.clone(),
-        operator_claims: artifact.payload.operator_claims.len(),
+        derivative_artifacts: artifact.payload.capabilities.derivative_artifacts.len(),
+        operator_claims: artifact.payload.capabilities.operator_claims.len(),
         structured_kernel_generation: StructuredKernelGenerationV2::Deferred {
             first_stage: "FC4".into(),
-            reason: "FC0-FC1 establish semantic identity and legality; TensorIR/QFunction lowering is not yet implemented".into(),
+            reason: "FC0-FC1 establish semantic identity and legality; TensorIR/QFunction lowering is introduced later".into(),
         },
         assembly_level_in_form_identity: false,
     })
+}
+
+fn measure_name(measure: &MeasureV2) -> &'static str {
+    match measure {
+        MeasureV2::Cell { .. } => "cell",
+        MeasureV2::ExteriorFacet { .. } => "exterior_facet",
+        MeasureV2::InteriorFacet { .. } => "interior_facet",
+        MeasureV2::Interface { .. } => "interface",
+        MeasureV2::Ridge { .. } => "ridge",
+        MeasureV2::Vertex { .. } => "vertex",
+    }
 }
 
 fn collect_requirements(
@@ -145,40 +157,35 @@ fn collect_requirements(
     requirements: &mut BTreeSet<LocalKernelRequirementV2>,
 ) {
     match expression {
-        FormExprV2::ScientificScalar { .. } => {
+        FormExprV2::Literal { .. } => {}
+        FormExprV2::Scientific { .. } => {
             requirements.insert(LocalKernelRequirementV2::ScientificScalarCall);
         }
-        FormExprV2::Argument { .. } => {
+        FormExprV2::Argument(_) => {
             requirements.insert(LocalKernelRequirementV2::ArgumentLoad);
         }
-        FormExprV2::Coefficient { .. } => {
+        FormExprV2::Coefficient(_) => {
             requirements.insert(LocalKernelRequirementV2::CoefficientLoad);
         }
-        FormExprV2::Constant { .. } => {
+        FormExprV2::Constant(_) => {
             requirements.insert(LocalKernelRequirementV2::ConstantLoad);
         }
-        FormExprV2::Neg { value } => {
+        FormExprV2::Neg(value) => {
             requirements.insert(LocalKernelRequirementV2::ScalarArithmetic);
             collect_requirements(value, requirements);
         }
-        FormExprV2::Add { values } | FormExprV2::Product { values } => {
+        FormExprV2::Add(values) | FormExprV2::Product(values) => {
             requirements.insert(LocalKernelRequirementV2::ScalarArithmetic);
             for value in values {
                 collect_requirements(value, requirements);
             }
         }
-        FormExprV2::Apply { args, .. } => {
-            requirements.insert(LocalKernelRequirementV2::ScientificScalarCall);
-            for argument in args {
-                collect_requirements(argument, requirements);
-            }
+        FormExprV2::TimeDerivative(value) => {
+            requirements.insert(LocalKernelRequirementV2::TimeDerivative);
+            collect_requirements(value, requirements);
         }
         FormExprV2::Gradient { value, .. } => {
             requirements.insert(LocalKernelRequirementV2::Gradient);
-            collect_requirements(value, requirements);
-        }
-        FormExprV2::TimeDerivative { value } => {
-            requirements.insert(LocalKernelRequirementV2::TimeDerivative);
             collect_requirements(value, requirements);
         }
         FormExprV2::Dot { left, right } => {
@@ -196,19 +203,18 @@ fn collect_requirements(
             collect_requirements(left, requirements);
             collect_requirements(right, requirements);
         }
-        FormExprV2::Conjugate { value } => {
+        FormExprV2::Conjugate(value) => {
             requirements.insert(LocalKernelRequirementV2::Conjugation);
             collect_requirements(value, requirements);
         }
-        FormExprV2::Transpose { value } => {
-            requirements.insert(LocalKernelRequirementV2::Transpose);
+        FormExprV2::Adjoint { value, kind, .. } => {
+            requirements.insert(match kind {
+                AdjointKindV2::Transpose => LocalKernelRequirementV2::Transpose,
+                AdjointKindV2::Hermitian => LocalKernelRequirementV2::HermitianTranspose,
+            });
             collect_requirements(value, requirements);
         }
-        FormExprV2::HermitianTranspose { value } => {
-            requirements.insert(LocalKernelRequirementV2::HermitianTranspose);
-            collect_requirements(value, requirements);
-        }
-        FormExprV2::Restrict { value, .. } => {
+        FormExprV2::Trace { value, .. } => {
             requirements.insert(LocalKernelRequirementV2::TraceRestriction);
             collect_requirements(value, requirements);
         }
@@ -225,13 +231,6 @@ pub enum VariationalAuditError {
 }
 
 impl VariationalAuditError {
-    fn from_form(error: FormV2Error) -> Self {
-        Self::InvalidArtifact {
-            resolvent_code: error.code().into(),
-            detail: error.to_string(),
-        }
-    }
-
     pub const fn code(&self) -> &'static str {
         match self {
             Self::InvalidArtifact { .. } => "MAL-FORM-001",
@@ -242,7 +241,7 @@ impl VariationalAuditError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use resolvent::{DerivativeArtifactStatusV2, adapt_scalar_h1_model_v2, parse_scientific_module};
+    use resolvent::{Digest, adapt_scalar_h1_model_v2, parse_scientific_module};
 
     const HEAT: &str = r#"
 module test.heat;
@@ -260,25 +259,23 @@ model Heat {
     #[test]
     fn scalar_v2_artifact_is_audited_without_claiming_structured_codegen() {
         let module = parse_scientific_module(HEAT).unwrap();
-        let artifact = adapt_scalar_h1_model_v2(&module.models[0]).unwrap();
-        let audit = audit_variational_form_v2(&artifact).unwrap();
-        assert_eq!(audit.artifact_digest, artifact.artifact_digest);
-        assert_eq!(audit.semantic_digest, artifact.semantic_digest);
-        assert_eq!(audit.arity, 1);
+        let bundle = adapt_scalar_h1_model_v2(&module.models[0]).unwrap();
+        let artifact = &bundle.forms[0];
+        let audit = audit_variational_form_v2(artifact).unwrap();
+        assert_eq!(audit.artifact_id, artifact.artifact_id);
         assert_eq!(
-            audit.compatibility_oracle_digest,
-            Some(artifact.payload.receipt.source_digest.clone())
+            audit.semantic_digest,
+            artifact.payload.semantic_digest().unwrap()
         );
+        assert_eq!(audit.arity, 1);
         assert!(audit.requirements.contains(&LocalKernelRequirementV2::Gradient));
         assert!(
             audit
                 .requirements
                 .contains(&LocalKernelRequirementV2::TimeDerivative)
         );
-        assert_eq!(
-            audit.derivative_artifacts.jvp,
-            DerivativeArtifactStatusV2::NotGenerated
-        );
+        assert_eq!(audit.derivative_artifacts, 0);
+        assert_eq!(audit.operator_claims, 0);
         assert!(matches!(
             audit.structured_kernel_generation,
             StructuredKernelGenerationV2::Deferred { ref first_stage, .. }
@@ -290,14 +287,15 @@ model Heat {
     #[test]
     fn tampered_artifacts_fail_with_a_stable_malleus_diagnostic() {
         let module = parse_scientific_module(HEAT).unwrap();
-        let mut artifact = adapt_scalar_h1_model_v2(&module.models[0]).unwrap();
-        artifact.artifact_digest = Digest::blake3(b"tampered");
+        let bundle = adapt_scalar_h1_model_v2(&module.models[0]).unwrap();
+        let mut artifact = bundle.forms[0].clone();
+        artifact.artifact_id = ArtifactIdV2(Digest::blake3(b"tampered"));
         let error = audit_variational_form_v2(&artifact).unwrap_err();
         assert_eq!(error.code(), "MAL-FORM-001");
         assert!(matches!(
             error,
             VariationalAuditError::InvalidArtifact { ref resolvent_code, .. }
-                if resolvent_code == "FORM-DIGEST-001"
+                if resolvent_code == "FORM-ARTIFACT-001"
         ));
     }
 }
