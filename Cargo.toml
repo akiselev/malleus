@@ -6,7 +6,7 @@
 name = "malleus"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.93"
 license = "MIT OR Apache-2.0"
 description = "Differentiable retargetable graph compiler: operator/kernel IR + Cranelift JIT"
 repository = "https://github.com/akiselev/malleus"
@@ -22,7 +22,10 @@ resolvent = ["jit", "dep:resolvent"]
 [dependencies]
 nalgebra = "0.34"
 thiserror = "2.0"
-resolvent = { git = "https://github.com/akiselev/resolvent", rev = "6b19709ef9247e47b7759b3239dd73df3202e367", optional = true }
+# Keep the scientific compiler tuple exact. Sinbad's physics-factory branch pins
+# this Malleus commit and the same merged Resolvent revision so Cargo resolves one
+# semantic IR throughout the stack.
+resolvent = { git = "https://github.com/akiselev/resolvent", rev = "138faaa3d61ad824735e0015a54894a994dd0477", optional = true }
 cranelift = { version = "0.116", optional = true }
 cranelift-jit = { version = "0.116", optional = true }
 cranelift-module = { version = "0.116", optional = true }
