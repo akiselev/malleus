@@ -25,7 +25,7 @@ thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"], optional = true }
 # FC0-FC1 consumes an exact semantic artifact contract. Sinbad pins this
 # Malleus revision and the same Resolvent revision so Cargo resolves one V2 IR.
-resolvent = { git = "https://github.com/akiselev/resolvent", rev = "1973e120abbb94ca9e3df710c6118a960485e9c3", optional = true }
+resolvent = { git = "https://github.com/akiselev/resolvent", rev = "ba0be14061afe8057e8bdc86eec93873c10212ea", optional = true }
 cranelift = { version = "0.116", optional = true }
 cranelift-jit = { version = "0.116", optional = true }
 cranelift-module = { version = "0.116", optional = true }
