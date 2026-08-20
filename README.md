@@ -1,35 +1,34 @@
-# malleus
+# Malleus
 
-Differentiable, retargetable graph compiler: a scalar opcode IR plus Cranelift
-codegen for residuals, Jacobians, and compiled Newton steps.
+Malleus is the structured compiler for finite-precision local numerical kernels.
+It owns the program shape between a scientific frontend and concrete CPU/GPU
+backends:
 
-`malleus` is the JIT that used to live in [solverang](https://github.com/akiselev/solverang).
-Solverang and [Sinbad](https://github.com/akiselev/sinbad) now depend on this
-crate. Later milestones add reverse-mode AD, e-graph rewriting, and non-CPU
-backends; this release is a faithful extraction of the existing CPU JIT.
-
-## Usage
-
-```toml
-malleus = { git = "https://github.com/akiselev/malleus" }
+```text
+StructuredModule -> validation -> ExecutableModule -> backend
+                                      |
+                                      +-> deterministic Interpreter
 ```
 
-The `jit` feature is on by default. Disable it when you only need the crate to
-exist as a dependency graph placeholder:
+The IR describes fixed local iteration domains, affine operand indexing, scalar
+expressions, reductions, numeric policy, and derivative requests. Scheduling is
+separate from the mathematical kernel. The reference executable uses canonical
+loop order and the interpreter provides a small, deterministic correctness
+oracle.
 
-```toml
-malleus = { git = "https://github.com/akiselev/malleus", default-features = false }
-```
+Malleus deliberately does not own equations, meshes, basis traversal, global
+assembly, nonlinear solvers, time integration, or simulation state. It has no
+dependencies on the rest of the Sinbad ecosystem.
 
-## Surface
+## Public boundary
 
-Build an opcode stream with `OpcodeEmitter`, then compile it with `JITCompiler`:
-
-- `JITFunction` — `evaluate_residuals` / `evaluate_jacobian` (and fused / dense variants)
-- `CompiledNewtonStep` — a whole Newton step compiled to native code
-
-`jit_available()` reports whether the current platform is supported (x86_64 and
-aarch64 on Linux, macOS, and Windows).
+- `StructuredKernel` and `StructuredModule` are the frontend-owned inputs.
+- `validate` and `validate_module` establish structural invariants.
+- `Executable` and `ExecutableModule` pair validated kernels with schedules.
+- `ExecutableModule::reference` constructs canonical reference executables.
+- `Interpreter::run` executes one kernel against explicit buffer bindings.
+- `DerivativeRequest` names JVP, VJP, and Jacobian variants without prescribing
+  an automatic-differentiation implementation.
 
 ## License
 

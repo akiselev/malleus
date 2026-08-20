@@ -1,36 +1,51 @@
 # Malleus status
 
-Updated: 2026-08-16
-Branch: `agent/r13-r20-wave-a-f`
-Milestone: Waves B-F / R13-R18 local-kernel responsibilities
+Updated: 2026-08-20
+Branch: `master`
+Milestone: structured local-kernel compiler reset
 
 ## Current role
 
-Malleus compiles finite-precision pointwise/local programs. Resolvent owns scientific/discrete meaning; Sinbad owns field/topology/runtime state; Solverang owns numerical algorithms. Malleus must not absorb mesh traversal, global assembly, coupling orchestration, or simulation history.
+Malleus owns backend-independent, finite-precision local kernel IR, structural
+validation, scheduling contracts, and reference execution. It does not own a
+scientific language, mesh topology, finite-element spaces, global assembly,
+solver policy, coupled state, or simulation history.
 
-## Implemented on this branch
+## Implemented
 
-- R13: `CompiledKernelBundle` for primal/JVP/VJP/parameter-derivative pointwise programs with stable binding layouts.
-- R15: property kernels for constants, linear expressions, 1-D tables, explicit physical/validity guards, derivatives, and external-provider boundaries.
-- R16: constitutive-kernel metadata for primal outputs, tangents, parameter derivatives, and stateful/local distinction.
-- R17: element-kernel binding contract exposes field values/gradients, geometry, quadrature weights, properties, and constitutive responses without importing global topology.
-- R18: block identities and deterministic cross-block shared-evaluation planning for property/constitutive CSE.
-- Existing direct Resolvent execution-plan lowering remains the finite-precision scalar compilation path.
-- Permanent Rust CI now runs rustfmt, clippy with warnings denied, and all-feature tests.
+- One dependency-free `malleus` crate.
+- `StructuredKernel` and `StructuredModule` with fixed iteration domains,
+  affine indexing maps, ordered SSA-like locals, scalar expressions,
+  predicates, stores, and reductions.
+- Explicit numeric policies and backend-neutral JVP/VJP/Jacobian request types.
+- Deterministic validation of operand names/maps, ranks, axes, access modes,
+  local definition order, and module kernel names.
+- `KernelSchedule`, `Executable`, and `ExecutableModule::reference` as the
+  backend boundary.
+- Deterministic sequential `Interpreter::run` over caller-owned buffers.
+- Focused tests for module compilation, pointwise execution, reductions, and
+  malformed local order.
 
-## Validation state
+The former scalar opcode stream, Cranelift JIT, compiled Newton step, Resolvent
+bridge, scientific compatibility metadata, property layer, and JIT tests have
+been removed. Git history is the archive; there is no compatibility surface.
 
-The initial CI cycle reached all new tests: rustfmt and clippy passed and 14/15 tests passed. The sole failure was a test expecting construction order instead of deterministic `BTreeMap` order; that assertion has been corrected and the branch was rustfmt-normalized. This user-authored status commit retriggers normal CI after GitHub marked the formatter-bot commit `action_required`.
+## Validation
 
-Do not mark the branch verified until the retriggered CI is green.
+Passed locally on 2026-08-20:
 
-## Cross-repository contract
+- `cargo fmt --all -- --check`
+- `cargo check --all-targets --all-features`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo test --all-features` — 3 integration tests and 0 doctests passed
 
-After Resolvent PR #9 has a green final Wave revision, update Malleus's exact Resolvent git revision and run CI again. Sinbad's federation lock will record that passing tuple.
+## Current limits and next work
 
-## Remaining before merge
-
-1. Confirm current Malleus-only CI is green.
-2. Pin the final passing Resolvent Wave revision.
-3. Re-run CI after the pin change.
-4. Update this file with the exact green dependency revision.
+- The reference interpreter stores `f64`; target backends must implement the
+  declared scalar/numeric policy exactly.
+- Tile, vectorization, and parallel decisions are validated metadata; the
+  reference interpreter intentionally serializes execution.
+- Derivative requests are contracts only. Implement structured differentiation
+  as an IR-to-IR pass before adding optimized native backends.
+- Add conservative write-alias and affine-bound proofs before enabling parallel
+  schedules in a production backend.
