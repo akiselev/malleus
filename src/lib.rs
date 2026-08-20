@@ -9,6 +9,8 @@
 mod compiled_newton;
 #[cfg(feature = "jit")]
 mod cranelift;
+#[cfg(feature = "resolvent")]
+mod form_v2;
 #[cfg(feature = "jit")]
 mod lower;
 #[cfg(feature = "jit")]
@@ -22,6 +24,12 @@ mod scientific_property;
 pub use compiled_newton::CompiledNewtonStep;
 #[cfg(feature = "jit")]
 pub use cranelift::{JITCompiler, JITError, JITFunction};
+#[cfg(feature = "resolvent")]
+pub use form_v2::{
+    IntegralKernelAuditV2, LocalKernelRequirementV2, MALLEUS_FORM_AUDIT_V2_SCHEMA,
+    StructuredKernelGenerationV2, VariationalAuditError, VariationalKernelAuditV2,
+    audit_variational_form_v2,
+};
 #[cfg(feature = "jit")]
 pub use lower::OpcodeEmitter;
 #[cfg(feature = "jit")]

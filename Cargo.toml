@@ -17,15 +17,15 @@ categories = ["compilers", "science"]
 [features]
 default = ["jit"]
 jit = ["cranelift", "cranelift-jit", "cranelift-module", "cranelift-native"]
-resolvent = ["jit", "dep:resolvent"]
+resolvent = ["jit", "dep:resolvent", "dep:serde"]
 
 [dependencies]
 nalgebra = "0.34"
 thiserror = "2.0"
-# Keep the scientific compiler tuple exact. Sinbad's physics-factory branch pins
-# this Malleus commit and the same merged Resolvent revision so Cargo resolves one
-# semantic IR throughout the stack.
-resolvent = { git = "https://github.com/akiselev/resolvent", optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+# FC0-FC1 consumes an exact semantic artifact contract. Sinbad pins this
+# Malleus revision and the same Resolvent revision so Cargo resolves one V2 IR.
+resolvent = { git = "https://github.com/akiselev/resolvent", rev = "b7f6b9f9cffd00d62447c94c2ea0414102db54a0", optional = true }
 cranelift = { version = "0.116", optional = true }
 cranelift-jit = { version = "0.116", optional = true }
 cranelift-module = { version = "0.116", optional = true }

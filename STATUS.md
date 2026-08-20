@@ -1,36 +1,48 @@
 # Malleus status
 
-Updated: 2026-08-16
-Branch: `agent/r13-r20-wave-a-f`
-Milestone: Waves B-F / R13-R18 local-kernel responsibilities
+Updated: 2026-08-20
+Branch: `agent/fc0-fc1-v2-form-audit`
+Milestone: Physics Factory FC0-FC1
 
 ## Current role
 
-Malleus compiles finite-precision pointwise/local programs. Resolvent owns scientific/discrete meaning; Sinbad owns field/topology/runtime state; Solverang owns numerical algorithms. Malleus must not absorb mesh traversal, global assembly, coupling orchestration, or simulation history.
+Malleus compiles finite-precision pointwise/local programs. Resolvent owns formulation and typed
+variational meaning; Sinbad owns mesh, basis/quadrature, assembly, and field state; Solverang owns
+numerical algorithms. Malleus must not absorb global topology, assembly policy, or solver state.
 
 ## Implemented on this branch
 
-- R13: `CompiledKernelBundle` for primal/JVP/VJP/parameter-derivative pointwise programs with stable binding layouts.
-- R15: property kernels for constants, linear expressions, 1-D tables, explicit physical/validity guards, derivatives, and external-provider boundaries.
-- R16: constitutive-kernel metadata for primal outputs, tangents, parameter derivatives, and stateful/local distinction.
-- R17: element-kernel binding contract exposes field values/gradients, geometry, quadrature weights, properties, and constitutive responses without importing global topology.
-- R18: block identities and deterministic cross-block shared-evaluation planning for property/constitutive CSE.
-- Existing direct Resolvent execution-plan lowering remains the finite-precision scalar compilation path.
-- Permanent Rust CI now runs rustfmt, clippy with warnings denied, and all-feature tests.
+- Pinned Resolvent FC0-FC1 revision
+  `b7f6b9f9cffd00d62447c94c2ea0414102db54a0`.
+- Added a V2 artifact audit boundary that verifies Resolvent content digests and receipts before any
+  local compiler consumes the form.
+- Inventories scalar/tensor, complex, gradient, time, contraction, conjugation, transpose, trace,
+  and facet/interface requirements per integral and for the whole form.
+- Exposes the digest-bound scalar-H1 compatibility oracle when present.
+- Reports structured TensorIR/QFunction generation as explicitly deferred to FC4; FC0-FC1 do not
+  claim a generated local kernel.
+- Confirms assembly level is not part of form identity and carries Resolvent's truthful derivative
+  artifact and operator-claim state through inspection.
+- Added tests for a scalar transient diffusion form and tampered-artifact rejection with stable
+  diagnostics.
 
 ## Validation state
 
-The initial CI cycle reached all new tests: rustfmt and clippy passed and 14/15 tests passed. The sole failure was a test expecting construction order instead of deterministic `BTreeMap` order; that assertion has been corrected and the branch was rustfmt-normalized. This user-authored status commit retriggers normal CI after GitHub marked the formatter-bot commit `action_required`.
+Pending the branch CI tuple:
 
-Do not mark the branch verified until the retriggered CI is green.
+```text
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features
+```
 
 ## Cross-repository contract
 
-After Resolvent PR #9 has a green final Wave revision, update Malleus's exact Resolvent git revision and run CI again. Sinbad's federation lock will record that passing tuple.
+Sinbad must pin this exact Malleus revision and the exact Resolvent revision above. The first runtime
+slice may execute only through the retained V1 scalar-H1 oracle after confirming the V2 artifact and
+Malleus audit agree on digests. Structured kernel generation remains FC4+.
 
-## Remaining before merge
+## Next work
 
-1. Confirm current Malleus-only CI is green.
-2. Pin the final passing Resolvent Wave revision.
-3. Re-run CI after the pin change.
-4. Update this file with the exact green dependency revision.
+FC4 consumes indexed TensorIR/QFunctionIR and emits actual structured local kernels. No FC2-FC3
+mesh, element, quadrature, or assembly ownership moves into Malleus.

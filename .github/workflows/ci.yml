@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [master, agent/r13-r20-wave-a-f]
+    branches: [master, "agent/**"]
   pull_request:
 
 jobs:
