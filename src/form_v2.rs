@@ -39,10 +39,7 @@ pub enum LocalKernelRequirementV2 {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum StructuredKernelGenerationV2 {
-    Deferred {
-        first_stage: String,
-        reason: String,
-    },
+    Deferred { first_stage: String, reason: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,10 +67,12 @@ pub struct VariationalKernelAuditV2 {
 pub fn audit_variational_form_v2(
     artifact: &ArtifactEnvelopeV2<VariationalFormV2>,
 ) -> Result<VariationalKernelAuditV2, VariationalAuditError> {
-    artifact.verify().map_err(|error| VariationalAuditError::InvalidArtifact {
-        resolvent_code: "FORM-ARTIFACT-001".into(),
-        detail: error.to_string(),
-    })?;
+    artifact
+        .verify()
+        .map_err(|error| VariationalAuditError::InvalidArtifact {
+            resolvent_code: "FORM-ARTIFACT-001".into(),
+            detail: error.to_string(),
+        })?;
     artifact
         .payload
         .validate()
@@ -86,13 +85,12 @@ pub fn audit_variational_form_v2(
             detail: error.to_string(),
         })?;
 
-    let semantic_digest = artifact
-        .payload
-        .semantic_digest()
-        .map_err(|error| VariationalAuditError::InvalidArtifact {
+    let semantic_digest = artifact.payload.semantic_digest().map_err(|error| {
+        VariationalAuditError::InvalidArtifact {
             resolvent_code: "FORM-DIGEST-001".into(),
             detail: error.to_string(),
-        })?;
+        }
+    })?;
 
     let mut all_requirements = BTreeSet::new();
     if artifact.payload.scalar_kind.is_complex() {
@@ -268,7 +266,11 @@ model Heat {
             artifact.payload.semantic_digest().unwrap()
         );
         assert_eq!(audit.arity, 1);
-        assert!(audit.requirements.contains(&LocalKernelRequirementV2::Gradient));
+        assert!(
+            audit
+                .requirements
+                .contains(&LocalKernelRequirementV2::Gradient)
+        );
         assert!(
             audit
                 .requirements
