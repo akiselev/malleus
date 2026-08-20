@@ -48,10 +48,7 @@ pub struct IntegralKernelAuditV2 {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum StructuredKernelGenerationV2 {
-    Deferred {
-        first_stage: String,
-        reason: String,
-    },
+    Deferred { first_stage: String, reason: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,14 +118,15 @@ pub fn audit_variational_form_v2(
             message: error.to_string(),
         })?;
 
-    let semantic_digest = artifact
-        .payload
-        .semantic_digest()
-        .map_err(|error| VariationalAuditError {
-            resolvent_code: "FORM-V2-DIGEST".into(),
-            path: "form".into(),
-            message: error.to_string(),
-        })?;
+    let semantic_digest =
+        artifact
+            .payload
+            .semantic_digest()
+            .map_err(|error| VariationalAuditError {
+                resolvent_code: "FORM-V2-DIGEST".into(),
+                path: "form".into(),
+                message: error.to_string(),
+            })?;
 
     let mut requirements = BTreeSet::new();
     requirements.insert(match artifact.payload.scalar_kind {
@@ -137,13 +135,22 @@ pub fn audit_variational_form_v2(
             LocalKernelRequirementV2::ComplexScalar
         }
     });
-    if artifact.payload.spaces.iter().any(|space| {
-        has_tensor_axes(&space.value_type)
-    }) || artifact.payload.coefficients.iter().any(|coefficient| {
-        has_tensor_axes(&coefficient.value_type)
-    }) || artifact.payload.constants.iter().any(|constant| {
-        has_tensor_axes(&constant.value_type)
-    }) {
+    if artifact
+        .payload
+        .spaces
+        .iter()
+        .any(|space| has_tensor_axes(&space.value_type))
+        || artifact
+            .payload
+            .coefficients
+            .iter()
+            .any(|coefficient| has_tensor_axes(&coefficient.value_type))
+        || artifact
+            .payload
+            .constants
+            .iter()
+            .any(|constant| has_tensor_axes(&constant.value_type))
+    {
         requirements.insert(LocalKernelRequirementV2::TensorAxes);
     }
 
@@ -195,8 +202,7 @@ fn collect_requirements(
     requirements: &mut BTreeSet<LocalKernelRequirementV2>,
 ) {
     match expression {
-        FormExprV2::Literal { value_type, .. }
-        | FormExprV2::Scientific { value_type, .. } => {
+        FormExprV2::Literal { value_type, .. } | FormExprV2::Scientific { value_type, .. } => {
             if has_tensor_axes(value_type) {
                 requirements.insert(LocalKernelRequirementV2::TensorAxes);
             }
@@ -276,10 +282,7 @@ model Heat {
 }
 "#;
         let model = parse_scientific_module(source).unwrap().models.remove(0);
-        adapt_scalar_h1_model_v2(&model)
-            .unwrap()
-            .forms
-            .remove(0)
+        adapt_scalar_h1_model_v2(&model).unwrap().forms.remove(0)
     }
 
     #[test]
@@ -299,10 +302,7 @@ model Heat {
                 .requirements
                 .contains(&LocalKernelRequirementV2::TensorAxes)
         );
-        assert_eq!(
-            audit.inner_conjugated_operand,
-            ConjugatedOperandV2::Right
-        );
+        assert_eq!(audit.inner_conjugated_operand, ConjugatedOperandV2::Right);
         assert_eq!(audit.derivative_artifact_count, 0);
         assert_eq!(audit.operator_claim_count, 0);
         assert!(!audit.assembly_level_in_form_identity);
