@@ -175,7 +175,7 @@ pub fn audit_variational_form_v2(
 
     Ok(VariationalKernelAuditV2 {
         schema: MALLEUS_FORM_AUDIT_V2_SCHEMA,
-        form_artifact: artifact.artifact_id,
+        form_artifact: artifact.artifact_id.clone(),
         semantic_digest,
         scalar_kind: artifact.payload.scalar_kind,
         arity: artifact.payload.arity(),
