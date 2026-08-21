@@ -1,8 +1,8 @@
 # Malleus status
 
-Updated: 2026-08-20
+Updated: 2026-08-21
 Branch: `master`
-Milestone: FC5 structured differentiation and reference execution
+Milestone: FC11 complete structured-IR serialization
 
 ## Current role
 
@@ -13,7 +13,7 @@ solver policy, coupled state, or simulation history.
 
 ## Implemented
 
-- One dependency-free `malleus` crate.
+- One `malleus` crate with Serde as its only runtime dependency.
 - `StructuredKernel` and `StructuredModule` with fixed iteration domains,
   affine indexing maps, explicit buffer regions and dense layouts, ordered SSA-like locals, scalar
   expressions, predicates, stores, and reductions.
@@ -27,6 +27,9 @@ solver policy, coupled state, or simulation history.
 - Deterministic sequential `Interpreter::run` over caller-owned buffers with
   row/column-major layouts, canonical reductions, and declared f32/f64 operation
   precision.
+- Complete Serde representations for schedule-independent modules, kernels, operands, indexing,
+  expressions, effects, numeric policy, and derivative products. Consumers re-run structural
+  validation after decoding before constructing executables.
 - Focused tests for module compilation, pointwise execution, reductions, f32
   precision, forward finite differences, reverse adjoint dot products, parameter
   selections, and malformed locals/indexes/layouts/effects.
@@ -37,7 +40,7 @@ been removed. Git history is the archive; there is no compatibility surface.
 
 ## Validation
 
-Passed locally on 2026-08-20:
+Passed locally on 2026-08-21:
 
 - `cargo fmt --all -- --check`
 - `cargo check --all-targets --all-features`

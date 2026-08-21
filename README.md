@@ -16,6 +16,10 @@ requests. Scheduling is separate from the mathematical kernel. The reference
 executable uses canonical reduction order and the interpreter provides a small,
 deterministic f32/f64 correctness oracle.
 
+All schedule-independent IR and derivative-product types have a Serde wire form. FC11 archives
+round-trip complete `StructuredModule` values and always pass decoded modules back through
+`validate_module` before execution; schedules and executable containers remain rebuilt data.
+
 Malleus deliberately does not own equations, meshes, basis traversal, global
 assembly, nonlinear solvers, time integration, or simulation state. It has no
 dependencies on the rest of the Sinbad ecosystem.
@@ -23,6 +27,7 @@ dependencies on the rest of the Sinbad ecosystem.
 ## Public boundary
 
 - `StructuredKernel` and `StructuredModule` are the frontend-owned inputs.
+- their complete typed contents serialize for identity-sensitive artifact archives;
 - `validate` and `validate_module` establish structural, bounds, layout, and
   effect invariants.
 - `differentiate` constructs schedule-independent structured JVP and VJP

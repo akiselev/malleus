@@ -11,3 +11,4 @@ keywords = ["compiler", "kernel", "numerics", "simulation"]
 categories = ["compilers", "science"]
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }

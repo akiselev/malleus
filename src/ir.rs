@@ -1,7 +1,10 @@
 //! Schedule-independent local-kernel intermediate representation.
 
+use serde::{Deserialize, Serialize};
+
 /// An iteration-axis identifier local to one kernel.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct AxisId(usize);
 
 impl AxisId {
@@ -15,7 +18,8 @@ impl AxisId {
 }
 
 /// An operand identifier local to one kernel.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct OperandId(usize);
 
 impl OperandId {
@@ -29,7 +33,8 @@ impl OperandId {
 }
 
 /// An SSA-like local identifier inside a kernel region.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct LocalId(usize);
 
 impl LocalId {
@@ -45,7 +50,7 @@ impl LocalId {
 /// Fixed extents for one local invocation domain.
 ///
 /// An empty domain is a scalar point kernel and executes once.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IterationDomain {
     pub extents: Vec<usize>,
 }
@@ -63,7 +68,8 @@ impl IterationDomain {
 }
 
 /// Mathematical role of an iteration axis before target scheduling.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum IteratorKind {
     Serial,
     Parallel,
@@ -71,7 +77,8 @@ pub enum IteratorKind {
 }
 
 /// The reduction applied by a reducing store.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReductionOp {
     Add,
     Multiply,
@@ -80,7 +87,8 @@ pub enum ReductionOp {
 }
 
 /// Observable memory effect of an operand.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AccessMode {
     Read,
     Write,
@@ -99,7 +107,7 @@ impl AccessMode {
 }
 
 /// One externally bound scalar or dense row-major tensor.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KernelOperand {
     pub name: String,
     pub shape: Vec<usize>,
@@ -150,7 +158,7 @@ impl KernelOperand {
 }
 
 /// The half-open region `[offset, offset + length)` within an externally bound buffer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BufferRegion {
     pub offset: usize,
     pub length: usize,
@@ -167,7 +175,7 @@ impl BufferRegion {
 /// Row-major rank-3 storage is therefore `[2, 1, 0]`; column-major storage is
 /// `[0, 1, 2]`. Keeping this permutation explicit makes layout part of the
 /// validated executable contract without introducing target-specific strides.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DenseLayout {
     pub minor_to_major: Vec<usize>,
 }
@@ -187,14 +195,14 @@ impl DenseLayout {
 }
 
 /// One term in an affine operand index.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexTerm {
     pub axis: AxisId,
     pub coefficient: isize,
 }
 
 /// An affine index expression `constant + sum(coefficient * axis)`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexExpr {
     pub constant: isize,
     pub terms: Vec<IndexTerm>,
@@ -230,7 +238,7 @@ impl IndexExpr {
 }
 
 /// Maps the current iteration coordinates to one operand element.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexingMap {
     pub operand: OperandId,
     pub results: Vec<IndexExpr>,
@@ -252,32 +260,36 @@ impl IndexingMap {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ScalarType {
     F32,
     F64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FmaPolicy {
     Forbidden,
     Allowed,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Reassociation {
     Forbidden,
     Allowed,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReductionOrder {
     Canonical,
     ScheduleDefined,
 }
 
 /// Finite-precision choices that are part of executable identity.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NumericPolicy {
     pub scalar_type: ScalarType,
     pub fma: FmaPolicy,
@@ -296,7 +308,8 @@ impl Default for NumericPolicy {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum UnaryOp {
     Neg,
     Abs,
@@ -310,7 +323,8 @@ pub enum UnaryOp {
     Ceil,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -322,7 +336,8 @@ pub enum BinaryOp {
     Atan2,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CompareOp {
     Eq,
     NotEq,
@@ -333,7 +348,8 @@ pub enum CompareOp {
 }
 
 /// A scalar expression evaluated at the current iteration point.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ScalarExpr {
     Constant(f64),
     Index(AxisId),
@@ -372,7 +388,8 @@ impl ScalarExpr {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Predicate {
     Constant(bool),
     Compare {
@@ -386,7 +403,8 @@ pub enum Predicate {
 }
 
 /// A region is ordered: locals are defined once and may only be used by later statements.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Statement {
     Let {
         local: LocalId,
@@ -398,13 +416,13 @@ pub enum Statement {
     },
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct KernelRegion {
     pub statements: Vec<Statement>,
 }
 
 /// Schedule-independent local numerical program.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StructuredKernel {
     pub name: String,
     pub iteration_domain: IterationDomain,
@@ -416,14 +434,15 @@ pub struct StructuredKernel {
 }
 
 /// A backend-independent collection of local kernels.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StructuredModule {
     pub name: String,
     pub kernels: Vec<StructuredKernel>,
 }
 
 /// The derivative program a backend is asked to produce.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DerivativeMode {
     Jvp,
     Vjp,
@@ -431,7 +450,7 @@ pub enum DerivativeMode {
 }
 
 /// Backend-neutral structured differentiation request.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DerivativeRequest {
     pub mode: DerivativeMode,
     pub independent_operands: Vec<OperandId>,
@@ -439,7 +458,7 @@ pub struct DerivativeRequest {
 }
 
 /// The derivative operand paired with one operand in the primal kernel.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DerivativeOperand {
     pub primal: OperandId,
     pub derivative: OperandId,
@@ -450,7 +469,7 @@ pub struct DerivativeOperand {
 /// For a JVP, `independent_operands` are direction inputs and
 /// `dependent_operands` are tangent outputs. For a VJP, dependent entries are
 /// cotangent seeds and independent entries are cotangent outputs.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DerivativeProduct {
     pub mode: DerivativeMode,
     pub kernel: StructuredKernel,
