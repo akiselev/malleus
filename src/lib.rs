@@ -7,20 +7,23 @@
 //! deterministic reference backend.
 #![forbid(unsafe_code)]
 
+mod differentiate;
 mod executable;
 mod interpreter;
 mod ir;
 mod validate;
 
+pub use differentiate::{DifferentiationError, differentiate};
 pub use executable::{
     Executable, ExecutableError, ExecutableModule, KernelSchedule, ParallelMapping, TileDecision,
     VectorizationPlan,
 };
 pub use interpreter::{BufferBinding, ExecutionError, Interpreter};
 pub use ir::{
-    AccessMode, AxisId, BinaryOp, CompareOp, DerivativeMode, DerivativeRequest, FmaPolicy,
-    IndexExpr, IndexTerm, IndexingMap, IterationDomain, IteratorKind, KernelOperand, KernelRegion,
-    LocalId, NumericPolicy, OperandId, Predicate, Reassociation, ReductionOp, ReductionOrder,
-    ScalarExpr, ScalarType, Statement, StructuredKernel, StructuredModule, UnaryOp,
+    AccessMode, AxisId, BinaryOp, BufferRegion, CompareOp, DenseLayout, DerivativeMode,
+    DerivativeOperand, DerivativeProduct, DerivativeRequest, FmaPolicy, IndexExpr, IndexTerm,
+    IndexingMap, IterationDomain, IteratorKind, KernelOperand, KernelRegion, LocalId,
+    NumericPolicy, OperandId, Predicate, Reassociation, ReductionOp, ReductionOrder, ScalarExpr,
+    ScalarType, Statement, StructuredKernel, StructuredModule, UnaryOp,
 };
 pub use validate::{ValidatedKernel, ValidatedModule, ValidationError, validate, validate_module};

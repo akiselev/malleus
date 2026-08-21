@@ -5,8 +5,8 @@ use std::error::Error;
 use std::fmt;
 
 use crate::{
-    AccessMode, AxisId, IndexExpr, KernelRegion, LocalId, OperandId, Predicate, ScalarExpr,
-    Statement, StructuredKernel, StructuredModule,
+    AccessMode, AxisId, IndexExpr, KernelRegion, Predicate, ScalarExpr, Statement,
+    StructuredKernel, StructuredModule,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -18,6 +18,8 @@ pub enum ValidationError {
     },
     DuplicateOperandName(String),
     InvalidOperand(usize),
+    InvalidRegion(usize),
+    InvalidLayout(usize),
     MissingIndexingMap(usize),
     DuplicateIndexingMap(usize),
     IndexRank {
@@ -30,6 +32,11 @@ pub enum ValidationError {
         operand: usize,
         axis: usize,
     },
+    IndexOutOfBounds {
+        operand: usize,
+        dimension: usize,
+    },
+    AliasingWrite(usize),
     InvalidLocal {
         expected: usize,
         actual: usize,
@@ -89,18 +96,33 @@ pub fn validate(kernel: StructuredKernel) -> Result<ValidatedKernel, ValidationE
         });
     }
     let mut names = BTreeSet::new();
-    for operand in &kernel.operands {
+    for (operand_index, operand) in kernel.operands.iter().enumerate() {
         if operand.name.trim().is_empty() {
             return Err(ValidationError::EmptyName);
         }
         if !names.insert(operand.name.clone()) {
             return Err(ValidationError::DuplicateOperandName(operand.name.clone()));
         }
-        operand
+        let element_count = operand
             .shape
             .iter()
             .try_fold(1usize, |n, extent| n.checked_mul(*extent))
-            .ok_or(ValidationError::InvalidOperand(0))?;
+            .ok_or(ValidationError::InvalidOperand(operand_index))?;
+        if operand.region.length < element_count
+            || operand
+                .region
+                .offset
+                .checked_add(operand.region.length)
+                .is_none()
+        {
+            return Err(ValidationError::InvalidRegion(operand_index));
+        }
+        let layout = &operand.layout.minor_to_major;
+        if layout.len() != operand.shape.len()
+            || layout.iter().copied().collect::<BTreeSet<_>>() != (0..operand.shape.len()).collect()
+        {
+            return Err(ValidationError::InvalidLayout(operand_index));
+        }
     }
     let mut mapped = vec![false; kernel.operands.len()];
     for map in &kernel.indexing_maps {
@@ -119,15 +141,83 @@ pub fn validate(kernel: StructuredKernel) -> Result<ValidatedKernel, ValidationE
                 actual: map.results.len(),
             });
         }
-        for expr in &map.results {
+        for (dimension, expr) in map.results.iter().enumerate() {
             validate_index(expr, operand, kernel.iteration_domain.rank())?;
+            validate_bounds(
+                expr,
+                &kernel.iteration_domain.extents,
+                definition.shape[dimension],
+                operand,
+                dimension,
+            )?;
         }
+        validate_write_aliases(map, definition.access, &kernel)?;
     }
     if let Some((operand, _)) = mapped.iter().enumerate().find(|(_, present)| !**present) {
         return Err(ValidationError::MissingIndexingMap(operand));
     }
     validate_region(&kernel.body, &kernel)?;
     Ok(ValidatedKernel(kernel))
+}
+
+fn validate_bounds(
+    expr: &IndexExpr,
+    extents: &[usize],
+    operand_extent: usize,
+    operand: usize,
+    dimension: usize,
+) -> Result<(), ValidationError> {
+    let mut minimum = expr.constant;
+    let mut maximum = expr.constant;
+    for term in &expr.terms {
+        let excursion = term
+            .coefficient
+            .checked_mul(extents[term.axis.index()].saturating_sub(1) as isize)
+            .ok_or(ValidationError::IndexOutOfBounds { operand, dimension })?;
+        if excursion < 0 {
+            minimum = minimum
+                .checked_add(excursion)
+                .ok_or(ValidationError::IndexOutOfBounds { operand, dimension })?;
+        } else {
+            maximum = maximum
+                .checked_add(excursion)
+                .ok_or(ValidationError::IndexOutOfBounds { operand, dimension })?;
+        }
+    }
+    if minimum < 0
+        || usize::try_from(maximum)
+            .ok()
+            .is_none_or(|maximum| maximum >= operand_extent)
+    {
+        return Err(ValidationError::IndexOutOfBounds { operand, dimension });
+    }
+    Ok(())
+}
+
+fn validate_write_aliases(
+    map: &crate::IndexingMap,
+    access: AccessMode,
+    kernel: &StructuredKernel,
+) -> Result<(), ValidationError> {
+    if matches!(access, AccessMode::Read | AccessMode::Reduce(_)) {
+        return Ok(());
+    }
+    let mut covered = BTreeSet::new();
+    for expression in &map.results {
+        if expression.terms.len() == 1 && expression.terms[0].coefficient.abs() == 1 {
+            covered.insert(expression.terms[0].axis);
+        }
+    }
+    if kernel
+        .iteration_domain
+        .extents
+        .iter()
+        .enumerate()
+        .any(|(axis, extent)| *extent > 1 && !covered.contains(&AxisId::new(axis)))
+    {
+        return Err(ValidationError::AliasingWrite(map.operand.index()));
+    }
+    Ok(())
 }
 
 pub fn validate_module(module: StructuredModule) -> Result<ValidatedModule, ValidationError> {
@@ -253,6 +343,3 @@ fn validate_predicate(
         }
     }
 }
-
-#[allow(dead_code)]
-fn _ids_are_local(_: AxisId, _: LocalId, _: OperandId, _: AccessMode) {}

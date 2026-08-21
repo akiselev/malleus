@@ -103,6 +103,8 @@ impl AccessMode {
 pub struct KernelOperand {
     pub name: String,
     pub shape: Vec<usize>,
+    pub region: BufferRegion,
+    pub layout: DenseLayout,
     pub access: AccessMode,
 }
 
@@ -111,6 +113,8 @@ impl KernelOperand {
         Self {
             name: name.into(),
             shape: Vec::new(),
+            region: BufferRegion::new(0, 1),
+            layout: DenseLayout::row_major(0),
             access,
         }
     }
@@ -120,10 +124,64 @@ impl KernelOperand {
         shape: impl Into<Vec<usize>>,
         access: AccessMode,
     ) -> Self {
+        let shape = shape.into();
+        let length = shape
+            .iter()
+            .try_fold(1usize, |size, extent| size.checked_mul(*extent))
+            .unwrap_or(usize::MAX);
         Self {
             name: name.into(),
-            shape: shape.into(),
+            region: BufferRegion::new(0, length),
+            layout: DenseLayout::row_major(shape.len()),
+            shape,
             access,
+        }
+    }
+
+    pub fn with_layout(mut self, layout: DenseLayout) -> Self {
+        self.layout = layout;
+        self
+    }
+
+    pub fn with_region(mut self, region: BufferRegion) -> Self {
+        self.region = region;
+        self
+    }
+}
+
+/// The half-open region `[offset, offset + length)` within an externally bound buffer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BufferRegion {
+    pub offset: usize,
+    pub length: usize,
+}
+
+impl BufferRegion {
+    pub const fn new(offset: usize, length: usize) -> Self {
+        Self { offset, length }
+    }
+}
+
+/// A dense layout expressed from the unit-stride dimension outwards.
+///
+/// Row-major rank-3 storage is therefore `[2, 1, 0]`; column-major storage is
+/// `[0, 1, 2]`. Keeping this permutation explicit makes layout part of the
+/// validated executable contract without introducing target-specific strides.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DenseLayout {
+    pub minor_to_major: Vec<usize>,
+}
+
+impl DenseLayout {
+    pub fn row_major(rank: usize) -> Self {
+        Self {
+            minor_to_major: (0..rank).rev().collect(),
+        }
+    }
+
+    pub fn column_major(rank: usize) -> Self {
+        Self {
+            minor_to_major: (0..rank).collect(),
         }
     }
 }
@@ -372,11 +430,30 @@ pub enum DerivativeMode {
     Jacobian,
 }
 
-/// Backend-neutral differentiation request. Malleus backends may reject modes they do not
-/// implement; the reference interpreter executes primal kernels only.
+/// Backend-neutral structured differentiation request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DerivativeRequest {
     pub mode: DerivativeMode,
     pub independent_operands: Vec<OperandId>,
     pub dependent_operands: Vec<OperandId>,
+}
+
+/// The derivative operand paired with one operand in the primal kernel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DerivativeOperand {
+    pub primal: OperandId,
+    pub derivative: OperandId,
+}
+
+/// A structured derivative kernel plus its explicit primal/derivative bindings.
+///
+/// For a JVP, `independent_operands` are direction inputs and
+/// `dependent_operands` are tangent outputs. For a VJP, dependent entries are
+/// cotangent seeds and independent entries are cotangent outputs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DerivativeProduct {
+    pub mode: DerivativeMode,
+    pub kernel: StructuredKernel,
+    pub independent_operands: Vec<DerivativeOperand>,
+    pub dependent_operands: Vec<DerivativeOperand>,
 }

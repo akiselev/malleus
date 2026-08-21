@@ -5,7 +5,7 @@ use std::fmt;
 
 use crate::{
     AccessMode, BinaryOp, CompareOp, Executable, IndexExpr, OperandId, Predicate, ReductionOp,
-    ScalarExpr, Statement, UnaryOp,
+    ReductionOrder, ScalarExpr, ScalarType, Statement, UnaryOp,
 };
 
 pub struct BufferBinding<'a> {
@@ -53,8 +53,12 @@ impl Interpreter {
                 return Err(ExecutionError::DuplicateBinding(id));
             }
             seen[id] = true;
-            let expected = operand.shape.iter().product::<usize>();
-            if binding.values.len() != expected {
+            let expected = operand
+                .region
+                .offset
+                .checked_add(operand.region.length)
+                .ok_or(ExecutionError::InvalidBinding(id))?;
+            if binding.values.len() < expected {
                 return Err(ExecutionError::InvalidBinding(id));
             }
         }
@@ -62,9 +66,18 @@ impl Interpreter {
             return Err(ExecutionError::MissingBinding(id));
         }
         let mut coordinates = vec![0; kernel.iteration_domain.rank()];
+        let canonical_order;
+        let order = if kernel.numeric_policy.reduction_order == ReductionOrder::Canonical {
+            canonical_order = (0..kernel.iteration_domain.rank())
+                .map(crate::AxisId::new)
+                .collect::<Vec<_>>();
+            &canonical_order
+        } else {
+            &executable.schedule().loop_order
+        };
         visit(
             &kernel.iteration_domain.extents,
-            &executable.schedule().loop_order,
+            order,
             0,
             &mut coordinates,
             &mut |coordinates| execute_point(executable, bindings, coordinates),
@@ -112,8 +125,15 @@ fn execute_point(
                 let offset = offset(
                     &map.results,
                     &kernel.operands[operand.index()].shape,
+                    &kernel.operands[operand.index()].layout.minor_to_major,
                     coordinates,
                 )
+                .and_then(|offset| {
+                    kernel.operands[operand.index()]
+                        .region
+                        .offset
+                        .checked_add(offset)
+                })
                 .ok_or(ExecutionError::InvalidIndex(operand.index()))?;
                 let binding = bindings
                     .iter_mut()
@@ -121,13 +141,37 @@ fn execute_point(
                     .expect("validated binding");
                 match kernel.operands[operand.index()].access {
                     AccessMode::Write | AccessMode::ReadWrite => binding.values[offset] = value,
-                    AccessMode::Reduce(ReductionOp::Add) => binding.values[offset] += value,
-                    AccessMode::Reduce(ReductionOp::Multiply) => binding.values[offset] *= value,
+                    AccessMode::Reduce(ReductionOp::Add) => {
+                        binding.values[offset] = binary(
+                            BinaryOp::Add,
+                            binding.values[offset],
+                            value,
+                            kernel.numeric_policy.scalar_type,
+                        )
+                    }
+                    AccessMode::Reduce(ReductionOp::Multiply) => {
+                        binding.values[offset] = binary(
+                            BinaryOp::Mul,
+                            binding.values[offset],
+                            value,
+                            kernel.numeric_policy.scalar_type,
+                        )
+                    }
                     AccessMode::Reduce(ReductionOp::Min) => {
-                        binding.values[offset] = binding.values[offset].min(value)
+                        binding.values[offset] = binary(
+                            BinaryOp::Min,
+                            binding.values[offset],
+                            value,
+                            kernel.numeric_policy.scalar_type,
+                        )
                     }
                     AccessMode::Reduce(ReductionOp::Max) => {
-                        binding.values[offset] = binding.values[offset].max(value)
+                        binding.values[offset] = binary(
+                            BinaryOp::Max,
+                            binding.values[offset],
+                            value,
+                            kernel.numeric_policy.scalar_type,
+                        )
                     }
                     AccessMode::Read => unreachable!("validated store"),
                 }
@@ -146,8 +190,11 @@ fn eval(
 ) -> Result<f64, ExecutionError> {
     let kernel = executable.kernel().as_kernel();
     Ok(match expr {
-        ScalarExpr::Constant(value) => *value,
-        ScalarExpr::Index(axis) => coordinates[axis.index()] as f64,
+        ScalarExpr::Constant(value) => cast(*value, kernel.numeric_policy.scalar_type),
+        ScalarExpr::Index(axis) => cast(
+            coordinates[axis.index()] as f64,
+            kernel.numeric_policy.scalar_type,
+        ),
         ScalarExpr::Local(local) => locals[local.index()],
         ScalarExpr::Load(operand) => {
             let map = kernel
@@ -158,22 +205,35 @@ fn eval(
             let offset = offset(
                 &map.results,
                 &kernel.operands[operand.index()].shape,
+                &kernel.operands[operand.index()].layout.minor_to_major,
                 coordinates,
             )
+            .and_then(|offset| {
+                kernel.operands[operand.index()]
+                    .region
+                    .offset
+                    .checked_add(offset)
+            })
             .ok_or(ExecutionError::InvalidIndex(operand.index()))?;
-            bindings
-                .iter()
-                .find(|binding| binding.operand == *operand)
-                .expect("validated binding")
-                .values[offset]
+            cast(
+                bindings
+                    .iter()
+                    .find(|binding| binding.operand == *operand)
+                    .expect("validated binding")
+                    .values[offset],
+                kernel.numeric_policy.scalar_type,
+            )
         }
-        ScalarExpr::Unary { op, arg } => {
-            unary(*op, eval(arg, executable, bindings, coordinates, locals)?)
-        }
+        ScalarExpr::Unary { op, arg } => unary(
+            *op,
+            eval(arg, executable, bindings, coordinates, locals)?,
+            kernel.numeric_policy.scalar_type,
+        ),
         ScalarExpr::Binary { op, lhs, rhs } => binary(
             *op,
             eval(lhs, executable, bindings, coordinates, locals)?,
             eval(rhs, executable, bindings, coordinates, locals)?,
+            kernel.numeric_policy.scalar_type,
         ),
         ScalarExpr::Select {
             condition,
@@ -215,8 +275,13 @@ fn predicate(
     })
 }
 
-fn offset(indices: &[IndexExpr], shape: &[usize], coordinates: &[usize]) -> Option<usize> {
-    let mut offset = 0usize;
+fn offset(
+    indices: &[IndexExpr],
+    shape: &[usize],
+    minor_to_major: &[usize],
+    coordinates: &[usize],
+) -> Option<usize> {
+    let mut values = Vec::with_capacity(indices.len());
     for (expr, extent) in indices.iter().zip(shape) {
         let index = expr.terms.iter().try_fold(expr.constant, |value, term| {
             value.checked_add(
@@ -228,36 +293,82 @@ fn offset(indices: &[IndexExpr], shape: &[usize], coordinates: &[usize]) -> Opti
         if index >= *extent {
             return None;
         }
-        offset = offset.checked_mul(*extent)?.checked_add(index)?;
+        values.push(index);
+    }
+    let mut offset = 0usize;
+    let mut stride = 1usize;
+    for dimension in minor_to_major {
+        offset = offset.checked_add(values[*dimension].checked_mul(stride)?)?;
+        stride = stride.checked_mul(shape[*dimension])?;
     }
     Some(offset)
 }
 
-fn unary(op: UnaryOp, value: f64) -> f64 {
-    match op {
-        UnaryOp::Neg => -value,
-        UnaryOp::Abs => value.abs(),
-        UnaryOp::Sqrt => value.sqrt(),
-        UnaryOp::Exp => value.exp(),
-        UnaryOp::Ln => value.ln(),
-        UnaryOp::Sin => value.sin(),
-        UnaryOp::Cos => value.cos(),
-        UnaryOp::Tan => value.tan(),
-        UnaryOp::Floor => value.floor(),
-        UnaryOp::Ceil => value.ceil(),
+fn unary(op: UnaryOp, value: f64, scalar_type: ScalarType) -> f64 {
+    match scalar_type {
+        ScalarType::F64 => match op {
+            UnaryOp::Neg => -value,
+            UnaryOp::Abs => value.abs(),
+            UnaryOp::Sqrt => value.sqrt(),
+            UnaryOp::Exp => value.exp(),
+            UnaryOp::Ln => value.ln(),
+            UnaryOp::Sin => value.sin(),
+            UnaryOp::Cos => value.cos(),
+            UnaryOp::Tan => value.tan(),
+            UnaryOp::Floor => value.floor(),
+            UnaryOp::Ceil => value.ceil(),
+        },
+        ScalarType::F32 => {
+            let value = value as f32;
+            (match op {
+                UnaryOp::Neg => -value,
+                UnaryOp::Abs => value.abs(),
+                UnaryOp::Sqrt => value.sqrt(),
+                UnaryOp::Exp => value.exp(),
+                UnaryOp::Ln => value.ln(),
+                UnaryOp::Sin => value.sin(),
+                UnaryOp::Cos => value.cos(),
+                UnaryOp::Tan => value.tan(),
+                UnaryOp::Floor => value.floor(),
+                UnaryOp::Ceil => value.ceil(),
+            }) as f64
+        }
     }
 }
 
-fn binary(op: BinaryOp, lhs: f64, rhs: f64) -> f64 {
-    match op {
-        BinaryOp::Add => lhs + rhs,
-        BinaryOp::Sub => lhs - rhs,
-        BinaryOp::Mul => lhs * rhs,
-        BinaryOp::Div => lhs / rhs,
-        BinaryOp::Pow => lhs.powf(rhs),
-        BinaryOp::Min => lhs.min(rhs),
-        BinaryOp::Max => lhs.max(rhs),
-        BinaryOp::Atan2 => lhs.atan2(rhs),
+fn binary(op: BinaryOp, lhs: f64, rhs: f64, scalar_type: ScalarType) -> f64 {
+    match scalar_type {
+        ScalarType::F64 => match op {
+            BinaryOp::Add => lhs + rhs,
+            BinaryOp::Sub => lhs - rhs,
+            BinaryOp::Mul => lhs * rhs,
+            BinaryOp::Div => lhs / rhs,
+            BinaryOp::Pow => lhs.powf(rhs),
+            BinaryOp::Min => lhs.min(rhs),
+            BinaryOp::Max => lhs.max(rhs),
+            BinaryOp::Atan2 => lhs.atan2(rhs),
+        },
+        ScalarType::F32 => {
+            let lhs = lhs as f32;
+            let rhs = rhs as f32;
+            (match op {
+                BinaryOp::Add => lhs + rhs,
+                BinaryOp::Sub => lhs - rhs,
+                BinaryOp::Mul => lhs * rhs,
+                BinaryOp::Div => lhs / rhs,
+                BinaryOp::Pow => lhs.powf(rhs),
+                BinaryOp::Min => lhs.min(rhs),
+                BinaryOp::Max => lhs.max(rhs),
+                BinaryOp::Atan2 => lhs.atan2(rhs),
+            }) as f64
+        }
+    }
+}
+
+fn cast(value: f64, scalar_type: ScalarType) -> f64 {
+    match scalar_type {
+        ScalarType::F32 => (value as f32) as f64,
+        ScalarType::F64 => value,
     }
 }
 
