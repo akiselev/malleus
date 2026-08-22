@@ -7,12 +7,18 @@
 //! deterministic reference backend.
 #![forbid(unsafe_code)]
 
+mod campaign;
 mod differentiate;
 mod executable;
 mod interpreter;
 mod ir;
 mod validate;
 
+pub use campaign::{
+    CampaignError, ComparisonTolerance, LocalCampaignReport, LocalCheckKind, LocalCheckResult,
+    LocalDifferentialCase, LocalExecutableRunner, NumericPolicyMutation, OperandValues,
+    check_numeric_policy_mutation, run_local_differential_campaign,
+};
 pub use differentiate::{DifferentiationError, differentiate};
 pub use executable::{
     Executable, ExecutableError, ExecutableModule, KernelSchedule, ParallelMapping, TileDecision,

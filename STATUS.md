@@ -2,7 +2,7 @@
 
 Updated: 2026-08-21
 Branch: `master`
-Milestone: FC11 complete structured-IR serialization
+Milestone: SV0-B2 reusable local differential campaigns
 
 ## Current role
 
@@ -33,6 +33,20 @@ solver policy, coupled state, or simulation history.
 - Focused tests for module compilation, pointwise execution, reductions, f32
   precision, forward finite differences, reverse adjoint dot products, parameter
   selections, and malformed locals/indexes/layouts/effects.
+- A module-complete `run_local_differential_campaign` API over caller-supplied local buffers. It
+  compares primal, JVP, VJP, and parameter-only JVP execution between the deterministic
+  interpreter and a distinct version-identified in-process `LocalExecutableRunner`, checks
+  centered differences and the JVP/VJP adjoint identity, and returns explicit per-check
+  tolerances/errors. Reference-interpreter self-comparison is refused.
+- Campaign validation requires exactly one case per module kernel, finite and sufficiently sized
+  operand buffers, disjoint state/parameter directions, seeds for every writable dependent, a
+  positive finite step, and nonnegative finite componentwise absolute-or-relative tolerances.
+  Missing coverage, ambiguous roles, backend refusal, non-finite output, and
+  completed-but-mismatching execution remain distinct outcomes.
+- Retained numeric-policy mutation fixtures cover f64-to-f32 demotion, f32-to-f64 promotion, and
+  reduction-order toggles. Reduction-order mutation executes a deterministic reversed loop order;
+  a mutation check passes only when at least one local output component leaves both declared
+  tolerances. Inapplicable mutations are refused.
 
 The former scalar opcode stream, Cranelift JIT, compiled Newton step, Resolvent
 bridge, scientific compatibility metadata, property layer, and JIT tests have
@@ -43,11 +57,11 @@ been removed. Git history is the archive; there is no compatibility surface.
 Passed locally on 2026-08-21:
 
 - `cargo fmt --all -- --check`
-- `cargo check --all-targets --all-features`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo test --all-features` — 9 integration tests and 0 doctests passed
-- `RUSTDOCFLAGS='-D warnings' cargo doc --no-deps`
-- `cargo test --doc`
+- `cargo check --locked --all-targets --all-features`
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`
+- `cargo test --locked --all-features` — 16 tests (1 unit, 15 integration) and 0 doctests passed
+- `RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps`
+- `cargo test --locked --doc`
 - `git diff --check`
 
 ## Current limits and next work
@@ -58,6 +72,10 @@ Passed locally on 2026-08-21:
   reference interpreter intentionally serializes execution.
 - Structured JVP and VJP are implemented; materialized Jacobians and
   differentiation through read-write state operands remain explicit refusals.
+- SV0-B2 campaigns are local conformance checks, not scientific verification or support-promotion
+  evidence by themselves. They do not select scientific objectives, norms, operating envelopes,
+  meshes, global operators, solvers, or histories. The executable runner is an in-process
+  interface; external process/tool lineage belongs to Sinbad/Outboard campaign infrastructure.
 - Bounds and simple injective-write maps are proved conservatively; general
   affine injectivity and overlapping external-region proofs remain future work
   before production parallel schedules.

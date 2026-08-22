@@ -35,9 +35,24 @@ dependencies on the rest of the Sinbad ecosystem.
 - `Executable` and `ExecutableModule` pair validated kernels with schedules.
 - `ExecutableModule::reference` constructs canonical reference executables.
 - `Interpreter::run` executes one kernel against explicit buffer bindings.
+- `run_local_differential_campaign` checks every kernel in a module with caller-supplied local
+  buffers: primal and generated JVP/VJP/parameter-JVP products are compared between the reference
+  interpreter and a distinct, version-identified `LocalExecutableRunner`; the reference
+  interpreter is refused as its own candidate. Centered differences and the JVP/VJP adjoint
+  identity provide independent local differential checks.
+- `check_numeric_policy_mutation` retains explicit f64-to-f32, f32-to-f64, and reduction-order
+  mutations and reports detection only when the mutated local result leaves the declared
+  tolerance.
 - `DerivativeRequest` selects independent and dependent operands; JVP and VJP
   are implemented as IR-to-IR passes, while materialized Jacobians are an
   explicit unsupported mode.
+
+Campaign cases must cover every module kernel exactly once and bind one finite buffer per operand,
+disjoint state/parameter directions, seeds for every writable dependent, a positive
+centered-difference step, and explicit componentwise absolute-or-relative tolerances. Backend
+refusal is distinct from a completed comparison that fails. The campaign interface is deliberately
+in-process and pointwise; it is not a mesh, assembly, solver, history, scientific-source, or
+external-process protocol.
 
 ## License
 
