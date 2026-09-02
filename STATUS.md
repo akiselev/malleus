@@ -147,6 +147,11 @@ Proof tests for the W7 packages: `two_kernel_composition_evaluates_equal_to_the_
 - Fusing a composition into one kernel (its own artifact identity) is not implemented.
 - The reference interpreter copies stage buffers in and out of a composition; a backend may
   alias them.
+- Vector/tensor gap observed while building the facet fixture (W7 package 3, not implemented):
+  one kernel cannot hold outputs with different free-axis sets (a scalar jump beside a
+  reduced normal flux) without an index-equality `Select` guard, because a scalar `Write` under
+  a reduction domain is an aliasing write. Scientia sidesteps it with one module per output;
+  Stokes/elasticity composition revealed no further gap, so nothing else was added.
 - Materialized Jacobians and differentiation through read-write operands remain refusals.
 - Bounds and simple injective-write maps are proved conservatively; general affine
   injectivity remains future work before production parallel schedules.
