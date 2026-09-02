@@ -469,10 +469,16 @@ pub struct DerivativeOperand {
 /// For a JVP, `independent_operands` are direction inputs and
 /// `dependent_operands` are tangent outputs. For a VJP, dependent entries are
 /// cotangent seeds and independent entries are cotangent outputs.
+///
+/// `primal_operands` pairs every readable primal operand with the operand of the derivative
+/// kernel that carries its primal value; consumers bind primal values through this table
+/// instead of assuming that readable operands keep their primal ids.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DerivativeProduct {
     pub mode: DerivativeMode,
     pub kernel: StructuredKernel,
+    #[serde(default)]
+    pub primal_operands: Vec<DerivativeOperand>,
     pub independent_operands: Vec<DerivativeOperand>,
     pub dependent_operands: Vec<DerivativeOperand>,
 }

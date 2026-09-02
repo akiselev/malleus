@@ -20,9 +20,17 @@ All schedule-independent IR and derivative-product types have a Serde wire form.
 round-trip complete `StructuredModule` values and always pass decoded modules back through
 `validate_module` before execution; schedules and executable containers remain rebuilt data.
 
+Two structured objects sit beside single kernels without changing them. A
+`KernelComposition` binds one kernel's output buffer to another kernel's input
+operand at execution time — the kernel-level form of a bound model input — and
+its JVP/VJP are compositions of the per-kernel derivative products. A
+`FacetPairKernel` gives a point kernel evaluated on an interior or interface
+facet a side role (minus cell, plus cell, or facet-native with a swap parity)
+for every operand; swap covariance is proven by execution, not declared.
+
 Malleus deliberately does not own equations, meshes, basis traversal, global
-assembly, nonlinear solvers, time integration, or simulation state. It has no
-dependencies on the rest of the Sinbad ecosystem.
+assembly, nonlinear solvers, time integration, simulation state, ports, or
+system vocabulary. It has no dependencies on the rest of the Sinbad ecosystem.
 
 ## Public boundary
 
@@ -45,7 +53,20 @@ dependencies on the rest of the Sinbad ecosystem.
   tolerance.
 - `DerivativeRequest` selects independent and dependent operands; JVP and VJP
   are implemented as IR-to-IR passes, while materialized Jacobians are an
-  explicit unsupported mode.
+  explicit unsupported mode. `DerivativeProduct::primal_operands` maps every
+  readable primal operand to its operand in the derivative kernel.
+- `kernel_digest`, `module_digest`, `composition_digest`, and `facet_pair_digest`
+  are deterministic blake3 identities over schema-bearing canonical encodings;
+  a composition or facet-pair digest embeds its kernels by digest, so wrapping
+  never changes what a kernel is.
+- `KernelComposition` / `validate_composition` / `ExecutableComposition` /
+  `Interpreter::run_composition` / `differentiate_composition` compose verbatim
+  kernels over `SharedBuffer` groups (writers before readers; fan-out and
+  reduce fan-in allowed) and derive them without fusing anything.
+- `FacetPairKernel` / `validate_facet_pair` / `differentiate_facet_pair` /
+  `check_facet_swap_symmetry` carry minus/plus/facet roles with partners and
+  swap parity; the only fixed convention is that odd facet data is oriented
+  from the minus cell to the plus cell.
 
 Campaign cases must cover every module kernel exactly once and bind one finite buffer per operand,
 disjoint state/parameter directions, seeds for every writable dependent, a positive

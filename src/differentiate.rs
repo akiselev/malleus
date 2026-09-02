@@ -163,6 +163,7 @@ fn jvp(
             body: KernelRegion { statements },
             numeric_policy: primal.numeric_policy,
         },
+        primal_operands: primal_operand_pairs(&primal_remap),
         independent_operands,
         dependent_operands,
     })
@@ -243,9 +244,20 @@ fn vjp(
             body: KernelRegion { statements },
             numeric_policy: primal.numeric_policy,
         },
+        primal_operands: primal_operand_pairs(&primal_remap),
         independent_operands,
         dependent_operands,
     })
+}
+
+fn primal_operand_pairs(remap: &BTreeMap<OperandId, OperandId>) -> Vec<DerivativeOperand> {
+    remap
+        .iter()
+        .map(|(primal, derivative)| DerivativeOperand {
+            primal: *primal,
+            derivative: *derivative,
+        })
+        .collect()
 }
 
 type ReadablePrimalOperands = (

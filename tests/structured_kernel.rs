@@ -339,3 +339,60 @@ fn interpreter_honors_validated_buffer_region_offsets() {
     .unwrap();
     assert_eq!(output, [77.0, 2.0, -4.0, 9.0]);
 }
+
+#[test]
+fn kernel_and_module_digests_are_deterministic_and_pinned() {
+    let kernel = scale_kernel();
+    let digest = malleus::kernel_digest(&kernel);
+    assert_eq!(digest, malleus::kernel_digest(&scale_kernel()));
+    assert_eq!(digest.algorithm, "blake3");
+    assert_eq!(
+        digest.hex, "e3eab00dad7c9a6d5a81ef668e18ecbb40275924af55d90be2bf3a96c0ee679d",
+        "the malleus-kernel-digest/1 wire encoding changed"
+    );
+    let mut renamed = scale_kernel();
+    renamed.name = "scaled".into();
+    assert_ne!(malleus::kernel_digest(&renamed), digest);
+    let mut policy = scale_kernel();
+    policy.numeric_policy.scalar_type = malleus::ScalarType::F32;
+    assert_ne!(malleus::kernel_digest(&policy), digest);
+    let module = StructuredModule {
+        name: "fixture".into(),
+        kernels: vec![kernel],
+    };
+    assert_eq!(
+        malleus::module_digest(&module),
+        malleus::module_digest(&module.clone())
+    );
+    assert_ne!(malleus::module_digest(&module).hex, digest.hex);
+}
+
+#[test]
+fn derivative_products_expose_the_primal_operand_table() {
+    let primal = quadratic_reduction_kernel();
+    let product = malleus::differentiate(
+        &primal,
+        &malleus::DerivativeRequest {
+            mode: malleus::DerivativeMode::Vjp,
+            independent_operands: vec![OperandId::new(1)],
+            dependent_operands: vec![OperandId::new(2)],
+        },
+    )
+    .unwrap();
+    let pairs = product
+        .primal_operands
+        .iter()
+        .map(|pair| (pair.primal.index(), pair.derivative.index()))
+        .collect::<Vec<_>>();
+    assert_eq!(pairs, vec![(0, 0), (1, 1)]);
+    for pair in &product.primal_operands {
+        assert_eq!(
+            product.kernel.operands[pair.derivative.index()].name,
+            primal.operands[pair.primal.index()].name
+        );
+        assert_eq!(
+            product.kernel.operands[pair.derivative.index()].access,
+            malleus::AccessMode::Read
+        );
+    }
+}

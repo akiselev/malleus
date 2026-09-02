@@ -1,85 +1,152 @@
 # Malleus status
 
-Updated: 2026-08-21
+Updated: 2026-09-01
 Branch: `master`
-Milestone: SV0-B2 reusable local differential campaigns
+Milestone: W7 Malleus lane — kernel-level `Composed` bind chains (SC-W1) and facet-pair
+trace kernels (SC-W2 pull-forward, SV2-B5), on top of SV0-B2 local differential campaigns
 
 ## Current role
 
 Malleus owns backend-independent, finite-precision local kernel IR, structural
-validation, scheduling contracts, and reference execution. It does not own a
-scientific language, mesh topology, finite-element spaces, global assembly,
-solver policy, coupled state, or simulation history.
+validation, scheduling contracts, reference execution, and the local AD products
+over them. It does not own a scientific language, mesh topology, finite-element
+spaces, global assembly, solver policy, coupled state, or simulation history. It
+has no port, connector, or system vocabulary: a bound model input is an opaque
+external operand, and composition binds buffers between verbatim kernels.
 
 ## Implemented
 
-- One `malleus` crate with Serde as its only runtime dependency.
+- One `malleus` crate. Runtime dependencies: `serde`, `serde_json`, `blake3`
+  (the last two only for deterministic artifact digests; pinned in `Cargo.lock`).
 - `StructuredKernel` and `StructuredModule` with fixed iteration domains,
   affine indexing maps, explicit buffer regions and dense layouts, ordered SSA-like locals, scalar
   expressions, predicates, stores, and reductions.
 - Explicit numeric policies and backend-neutral JVP/VJP/Jacobian request types;
   schedule-independent structured forward and reverse AD emits new validated IR.
+  `DerivativeProduct::primal_operands` (additive, `serde(default)`) pairs every readable primal
+  operand with its operand in the derivative kernel so consumers bind primal values through an
+  explicit table instead of assuming ids are preserved.
 - Deterministic validation of operand names/maps, ranks, layout permutations,
   affine bounds, write effects/aliasing, axes, access modes, local definition
   order, derivative requests, and module kernel names.
 - `KernelSchedule`, `Executable`, and `ExecutableModule::reference` as the
-  backend boundary.
-- Deterministic sequential `Interpreter::run` over caller-owned buffers with
-  row/column-major layouts, canonical reductions, and declared f32/f64 operation
-  precision.
-- Complete Serde representations for schedule-independent modules, kernels, operands, indexing,
-  expressions, effects, numeric policy, and derivative products. Consumers re-run structural
-  validation after decoding before constructing executables.
-- Focused tests for module compilation, pointwise execution, reductions, f32
-  precision, forward finite differences, reverse adjoint dot products, parameter
-  selections, and malformed locals/indexes/layouts/effects.
-- A module-complete `run_local_differential_campaign` API over caller-supplied local buffers. It
-  compares primal, JVP, VJP, and parameter-only JVP execution between the deterministic
-  interpreter and a distinct version-identified in-process `LocalExecutableRunner`, checks
-  centered differences and the JVP/VJP adjoint identity, and returns explicit per-check
-  tolerances/errors. Reference-interpreter self-comparison is refused.
-- Campaign validation requires exactly one case per module kernel, finite and sufficiently sized
-  operand buffers, disjoint state/parameter directions, seeds for every writable dependent, a
-  positive finite step, and nonnegative finite componentwise absolute-or-relative tolerances.
-  Missing coverage, ambiguous roles, backend refusal, non-finite output, and
-  completed-but-mismatching execution remain distinct outcomes.
-- Retained numeric-policy mutation fixtures cover f64-to-f32 demotion, f32-to-f64 promotion, and
-  reduction-order toggles. Reduction-order mutation executes a deterministic reversed loop order;
-  a mutation check passes only when at least one local output component leaves both declared
-  tolerances. Inapplicable mutations are refused.
-
-The former scalar opcode stream, Cranelift JIT, compiled Newton step, Resolvent
-bridge, scientific compatibility metadata, property layer, and JIT tests have
-been removed. Git history is the archive; there is no compatibility surface.
+  backend boundary; deterministic sequential `Interpreter::run` with row/column-major layouts,
+  canonical reductions, and declared f32/f64 operation precision.
+- **Digests** (`digest.rs`): `Digest { algorithm, hex }` (blake3 over canonical serde JSON of a
+  schema-bearing payload; same wire shape as the federation's `Digest`). `kernel_digest`
+  (`malleus-kernel-digest/1`, pinned by a golden test) and `module_digest`
+  (`malleus-module-digest/1`).
+- **Kernel compositions** (`compose.rs`, ARCHITECTURE.md §6 `BoundChain::Composed`):
+  `KernelComposition { name, stages: Vec<StructuredKernel>, shared_buffers: Vec<SharedBuffer> }`
+  holds stage kernels verbatim; a `SharedBuffer { members: Vec<StageOperand> }` aliases one
+  buffer across stages (one `Write` member or several same-op `Reduce` members, at least one
+  `Read` member, writers strictly before readers, equal shape/layout/region; readers may repeat
+  in one stage, writers may not). `validate_composition` → `ValidatedComposition` →
+  `ExecutableComposition::reference`; `Interpreter::run_composition` binds unshared operands by
+  `StageOperand` and, optionally, whole shared buffers by index (unbound shared buffers are
+  zero-initialized scratch). `composition_digest` (`malleus-kernel-composition/1`) covers the
+  stage digests and the sharing table only. `differentiate_composition` builds the JVP/VJP as a
+  composition of per-stage `differentiate` products: reproduced primal producer stages, then
+  derivative stages (forward order for JVP, reverse for VJP), with the producer tangent shared
+  into each consumer direction (JVP) or each consumer cotangent reduced into the producer seed
+  (VJP). Fan-out to several consumers accumulates. Structurally disconnected request operands
+  are typed refusals (`IndependentUnreachable`/`DependentUnreachable`), as are shared operands
+  in a request.
+- **Facet-pair kernels** (`facet.rs`, ARCHITECTURE.md §4/§8, SV2-B5):
+  `FacetPairKernel { kernel, roles: Vec<FacetOperandRole> }` with
+  `FacetOperandRole::Cell { side: Minus|Plus, partner: Option<OperandId> } | Facet { parity:
+  Even|Odd }`. The only convention Malleus fixes is `FACET_NORMAL_CONVENTION = "minus_to_plus"`:
+  odd facet data (the normal, oriented fluxes) negates under side relabelling. A side-owned
+  outward flux datum (the port unknown in the dual trace space) is a `Cell` operand of its
+  owner; the balance row between the two owners is an `Even` facet output.
+  `validate_facet_pair` checks role count, presence of both sides, symmetric partners with equal
+  shape/layout/region/access, and no odd non-additive reduction outputs.
+  `check_facet_swap_symmetry` proves swap covariance by executing the kernel with the sides
+  exchanged and reports per-output deviations (a wrong parity declaration is detected, an
+  unpaired cell operand is refused). `differentiate_facet_pair` carries roles onto derivative
+  operands (partners survive only when both sides are requested). `facet_pair_digest`
+  (`malleus-facet-pair-kernel/1`) covers the inner kernel digest, roles, and convention.
+- A module-complete `run_local_differential_campaign` API (SV0-B2) comparing primal, JVP, VJP,
+  and parameter-only JVP execution between the interpreter and a distinct version-identified
+  `LocalExecutableRunner`, with centered differences, the adjoint identity, explicit tolerances,
+  and retained numeric-policy mutation fixtures (`check_numeric_policy_mutation`).
+- Complete Serde representations for modules, kernels, compositions, facet-pair kernels, and
+  derivative products. Consumers re-run structural validation after decoding.
 
 ## Validation
 
-Passed locally on 2026-08-21:
+Passed locally on 2026-09-01 (machine shared with seven concurrent lanes):
 
 - `cargo fmt --all -- --check`
-- `cargo check --locked --all-targets --all-features`
-- `cargo clippy --locked --all-targets --all-features -- -D warnings`
-- `cargo test --locked --all-features` — 16 tests (1 unit, 15 integration) and 0 doctests passed
-- `RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps`
-- `cargo test --locked --doc`
+- `cargo clippy --offline --all-targets --all-features -- -D warnings`
+- `cargo test --offline` chunked per binary — 33 tests: 1 unit; `structured_kernel` 11;
+  `sv0_campaign` 6; `composition` 9; `facet_pair` 6; 0 doctests
+- `RUSTDOCFLAGS='-D warnings' cargo doc --offline --no-deps`
 - `git diff --check`
+
+Proof tests for the W7 packages: `two_kernel_composition_evaluates_equal_to_the_hand_inlined_kernel`,
+`jvp_through_the_composition_matches_the_inlined_jvp`,
+`cross_block_jvp_is_the_chain_rule_of_producer_and_consumer_tangents`,
+`vjp_through_the_composition_satisfies_the_adjoint_identity` (1e-12),
+`fan_out_to_two_consumers_accumulates_the_producer_cotangent`,
+`component_kernel_digests_are_unchanged_by_composition_and_differentiation`,
+`swap_covariance_is_proven_by_execution_and_a_wrong_parity_is_detected`,
+`jvp_and_vjp_of_the_facet_pair_satisfy_the_adjoint_identity_and_keep_roles`,
+`kernel_and_module_digests_are_deterministic_and_pinned`.
+
+## Contract shapes landed (for GX-CONTRACTS C12)
+
+- `malleus::Digest { algorithm: "blake3", hex }`; schemas `malleus-kernel-digest/1`,
+  `malleus-module-digest/1`, `malleus-kernel-composition/1`, `malleus-facet-pair-kernel/1`.
+- `KernelComposition`, `SharedBuffer`, `StageOperand`, `CompositionTarget`,
+  `CompositionDerivativeRequest`, `CompositionDerivativeProduct { primal_stages,
+  derivative_stages: [{ primal_stage, stage, primal_operands }], independent_operands,
+  dependent_operands }`, `CompositionError`, `CompositionExecutionError`,
+  `CompositionDifferentiationError`.
+- `FacetPairKernel`, `FacetOperandRole`, `FacetSide`, `SwapParity`, `FACET_NORMAL_CONVENTION`,
+  `FacetPairDerivativeProduct`, `FacetSwapReport`, `FacetPairError`, `FacetSwapError`.
+- `DerivativeProduct::primal_operands` (additive).
+
+## Deviations from `sinbad/ARCHITECTURE.md` and why
+
+- §6 says the cross block is the product of two local point kernels evaluated by Finitum at
+  quadrature points. Malleus makes that product a typed, digested object (`differentiate_composition`
+  with the independent set restricted to the producer's inputs yields exactly the consumer input
+  tangent composed with the producer output tangent) instead of a pair of closures, so the
+  chain rule has an identity, a wire form, and an interpreter proof. Finitum may still evaluate
+  the two kernels itself; the composition is the contract, not a mandate to change its loop.
+- Binding is buffer-level between whole stage invocations, not per-quadrature-point value
+  passing. This is what makes tensor-valued outputs, reduced outputs, and fan-out well-defined
+  without touching kernel bodies; it also means a composition never crosses a mesh (that is
+  `BoundChain::Transferred`, Finitum/Krasis).
+- Trace classes (`Value`/`Normal`/`Tangential`/`FacetL2`, §3.4) are not recorded on facet-pair
+  operands: they are function-space vocabulary owned by Scientia. Malleus records only side
+  ownership, partners, and swap parity, which is all the kernel's covariance needs.
+
+## Consumer surface changes required (recorded for the Scientia/Finitum lanes)
+
+- Scientia: lower `output` declarations to point-kernel bundles over the model's QFunction
+  inputs (today only form integrals and property definitions lower); a `SysBlock::Composed`
+  needs the producer output bundle and the consumer slot operand to build a `KernelComposition`,
+  whose `composition_digest` belongs in the system artifact chain.
+- Finitum: `bind_kernels`/`execute` gain a composed variant that binds `StageOperand`s from
+  the two instances' point evaluations (values by `derivative_stages[..].primal_operands`,
+  directions/seeds by the request tables) and records `composition_digest` in its receipt;
+  facet-pair kernels need the interior/interface facet traversal to gather minus/plus traces and
+  the minus-to-plus normal (SV2-B2 pull-forward).
 
 ## Current limits and next work
 
-- The reference interpreter uses `f64` storage while rounding loads and every
-  operation according to the declared f32/f64 policy.
-- Tile, vectorization, and parallel decisions are validated metadata; the
-  reference interpreter intentionally serializes execution.
-- Structured JVP and VJP are implemented; materialized Jacobians and
-  differentiation through read-write state operands remain explicit refusals.
-- SV0-B2 campaigns are local conformance checks, not scientific verification or support-promotion
-  evidence by themselves. They do not select scientific objectives, norms, operating envelopes,
-  meshes, global operators, solvers, or histories. The executable runner is an in-process
-  interface; external process/tool lineage belongs to Sinbad/Outboard campaign infrastructure.
-- Bounds and simple injective-write maps are proved conservatively; general
-  affine injectivity and overlapping external-region proofs remain future work
-  before production parallel schedules.
-- Planned with the SC composition program (`sinbad/ARCHITECTURE.md` §8; nothing
-  landed): two-sided facet-pair (trace) kernels for Nitsche/mortar interface terms
-  (SC-W2/W3). Malleus gains no port, connector, or system vocabulary; bound inputs
-  stay opaque external fields, composed at quadrature points by Finitum.
+- Request operands of a composition derivative must be exposed (unshared); tangents of an
+  intermediate shared output are not exposed (a caller can still observe its primal value by
+  binding the shared buffer).
+- `run_local_differential_campaign` does not yet accept compositions or facet-pair kernels;
+  the interpreter proofs above are direct tests, not campaign cases.
+- No facet-pair composition wrapper: composing a producer output into a facet-pair kernel's
+  side operand works at the plain-kernel level and loses no roles, but no helper builds it.
+- Fusing a composition into one kernel (its own artifact identity) is not implemented.
+- The reference interpreter copies stage buffers in and out of a composition; a backend may
+  alias them.
+- Materialized Jacobians and differentiation through read-write operands remain refusals.
+- Bounds and simple injective-write maps are proved conservatively; general affine
+  injectivity remains future work before production parallel schedules.
