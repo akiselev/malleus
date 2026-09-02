@@ -79,3 +79,7 @@ Passed locally on 2026-08-21:
 - Bounds and simple injective-write maps are proved conservatively; general
   affine injectivity and overlapping external-region proofs remain future work
   before production parallel schedules.
+- Planned with the SC composition program (`sinbad/ARCHITECTURE.md` §8; nothing
+  landed): two-sided facet-pair (trace) kernels for Nitsche/mortar interface terms
+  (SC-W2/W3). Malleus gains no port, connector, or system vocabulary; bound inputs
+  stay opaque external fields, composed at quadrature points by Finitum.
