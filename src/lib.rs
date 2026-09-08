@@ -15,6 +15,7 @@
 
 mod campaign;
 mod compose;
+mod dependency;
 mod differentiate;
 mod digest;
 mod executable;
@@ -36,6 +37,7 @@ pub use compose::{
     StageOperand, ValidatedComposition, composition_digest, differentiate_composition,
     validate_composition,
 };
+pub use dependency::primal_output_reads_input;
 pub use differentiate::{DifferentiationError, differentiate};
 pub use digest::{
     Digest, KERNEL_DIGEST_SCHEMA, MODULE_DIGEST_SCHEMA, kernel_digest, module_digest,

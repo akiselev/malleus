@@ -1,9 +1,9 @@
 # Malleus status
 
-Updated: 2026-09-01
+Updated: 2026-09-08
 Branch: `master`
-Milestone: W7 Malleus lane — kernel-level `Composed` bind chains (SC-W1) and facet-pair
-trace kernels (SC-W2 pull-forward, SV2-B5), on top of SV0-B2 local differential campaigns
+Milestone: W8 validated primal output input-read proofs for Scientia property bindings;
+W7 composition/facet contracts and SV0-B2 differential campaigns retained
 
 ## Current role
 
@@ -15,6 +15,15 @@ has no port, connector, or system vocabulary: a bound model input is an opaque
 external operand, and composition binds buffers between verbatim kernels.
 
 ## Implemented
+
+- `primal_output_reads_input(&StructuredKernel, OperandId) -> Result<bool, ValidationError>`:
+  validates the full kernel and readable input, follows ordered local and operand dependencies
+  to final writable outputs, ignores dead locals/overwritten stores, retains reduction history,
+  and conservatively includes select predicates and both branches. No algebraic cancellation.
+  Static affine addresses cannot read data. All writable buffers, including read-write buffers,
+  are outputs; carried dependence is conservative across repeated iteration addresses. A false
+  result proves no value dependency, not freedom from errors in eagerly executed dead expressions.
+  Scientia consumes this owner proof for property argument admission; no frontend IR walker needed.
 
 - One `malleus` crate. Runtime dependencies: `serde`, `serde_json`, `blake3`
   (the last two only for deterministic artifact digests; pinned in `Cargo.lock`).
@@ -75,14 +84,16 @@ external operand, and composition binds buffers between verbatim kernels.
 
 ## Validation
 
-Passed locally on 2026-09-01 (machine shared with seven concurrent lanes):
+Passed locally on 2026-09-08:
 
-- `cargo fmt --all -- --check`
-- `cargo clippy --offline --all-targets --all-features -- -D warnings`
-- `cargo test --offline` chunked per binary — 33 tests: 1 unit; `structured_kernel` 11;
-  `sv0_campaign` 6; `composition` 9; `facet_pair` 6; 0 doctests
-- `RUSTDOCFLAGS='-D warnings' cargo doc --offline --no-deps`
-- `git diff --check`
+- `cargo test --locked --workspace --all-targets`: 38 tests passed (1 unit; composition 9;
+  facet_pair 6; output_dependency 5; structured_kernel 11; sv0_campaign 6).
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`
+- `RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps`
+- `cargo fmt --package malleus -- --check`; `git diff --check`
+- Focused `output_dependency` 5/5: unused/dead/overwritten data, local/operand transitivity,
+  all outputs, no cancellation, predicate and branch conservatism, affine/reduction behavior,
+  invalid locals and invalid/nonreadable queried operands.
 
 Proof tests for the W7 packages: `two_kernel_composition_evaluates_equal_to_the_hand_inlined_kernel`,
 `jvp_through_the_composition_matches_the_inlined_jvp`,
