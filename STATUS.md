@@ -86,14 +86,16 @@ external operand, and composition binds buffers between verbatim kernels.
 
 Passed locally on 2026-09-08:
 
-- `cargo test --locked --workspace --all-targets`: 38 tests passed (1 unit; composition 9;
-  facet_pair 6; output_dependency 5; structured_kernel 11; sv0_campaign 6).
+- `cargo test --locked --workspace --all-targets`: 39 tests passed (1 unit; composition 9;
+  facet_pair 6; output_dependency 6; structured_kernel 11; sv0_campaign 6).
 - `cargo clippy --locked --all-targets --all-features -- -D warnings`
 - `RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps`
 - `cargo fmt --package malleus -- --check`; `git diff --check`
-- Focused `output_dependency` 5/5: unused/dead/overwritten data, local/operand transitivity,
+- Focused `output_dependency` 6/6: unused/dead/overwritten data, local/operand transitivity,
   all outputs, no cancellation, predicate and branch conservatism, affine/reduction behavior,
-  invalid locals and invalid/nonreadable queried operands.
+  invalid locals and invalid/nonreadable queried operands. Queried read-write operands
+  conservatively return true: partial stores and empty iteration domains can retain initial data.
+  This corrects the initial whole-buffer overwrite assumption; both cases have regressions.
 
 Proof tests for the W7 packages: `two_kernel_composition_evaluates_equal_to_the_hand_inlined_kernel`,
 `jvp_through_the_composition_matches_the_inlined_jvp`,

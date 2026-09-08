@@ -10,7 +10,9 @@ use crate::{
 /// This is a structural proof of non-use, not a derivative or algebraic simplifier.
 /// Ordered local definitions and overwritten stores are followed; dead locals do not
 /// contribute. Both select branches and their predicates contribute even when a predicate
-/// is constant. Read-write buffers are themselves outputs, so a carried dependence is conservatively
+/// is constant. A queried read-write input always conservatively reads itself because
+/// stores may leave elements untouched or execute zero times. Read-write buffers are themselves
+/// outputs, so a carried dependence is conservatively
 /// reported even if a later iteration could overwrite it. Operand elements are not distinguished.
 /// All indexing maps and iteration extents in this IR are static and cannot depend on input data.
 /// A `false` result proves no input-to-output value path, not absence of execution-time errors
@@ -26,6 +28,11 @@ pub fn primal_output_reads_input(
         .ok_or(ValidationError::InvalidOperand(input.index()))?;
     if !operand.access.can_read() {
         return Err(ValidationError::InvalidLoad(input.index()));
+    }
+    // Validation does not require stores to cover the whole buffer, or a nonempty
+    // iteration domain. Untouched elements retain the queried initial value.
+    if operand.access == AccessMode::ReadWrite {
+        return Ok(true);
     }
     let mut values = vec![false; kernel.operands.len()];
     values[input.index()] = true;

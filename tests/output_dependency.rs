@@ -132,3 +132,15 @@ fn invalid_kernel_and_invalid_input_are_typed_errors() {
         Err(ValidationError::InvalidLoad(1))
     );
 }
+
+#[test]
+fn partially_written_or_unexecuted_readwrite_inputs_remain_dependent() {
+    let mut k = kernel(vec![store(2, ScalarExpr::Constant(0.0))]);
+    k.operands[2] = KernelOperand::tensor("scratch", vec![2], AccessMode::ReadWrite);
+    k.indexing_maps[2] = IndexingMap::new(OperandId::new(2), vec![IndexExpr::constant(0)]);
+    assert!(primal_output_reads_input(&k, OperandId::new(2)).unwrap());
+    k.iteration_domain = IterationDomain::new(vec![0]);
+    k.iterators = vec![IteratorKind::Serial];
+    assert!(primal_output_reads_input(&k, OperandId::new(2)).unwrap());
+    assert!(!query(&k));
+}
