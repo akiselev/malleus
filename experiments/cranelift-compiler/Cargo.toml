@@ -1,0 +1,27 @@
+[package]
+name = "malleus-cranelift-experiment"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+malleus = { path = "../.." }
+cranelift-codegen = "=0.128.3"
+cranelift-frontend = "=0.128.3"
+cranelift-module = "=0.128.3"
+cranelift-jit = "=0.128.3"
+cranelift-native = "=0.128.3"
+serde_json = "1"
+thiserror = "2"
+
+[profile.dev]
+opt-level = 1
+debug = 0
+
+[profile.dev.package.malleus]
+opt-level = 3
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

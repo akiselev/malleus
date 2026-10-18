@@ -1,9 +1,25 @@
 # Malleus status
 
-Updated: 2026-09-08
+Updated: 2026-10-18
 Branch: `master`
-Milestone: W8 validated primal output input-read proofs for Scientia property bindings;
-W7 composition/facet contracts and SV0-B2 differential campaigns retained
+Milestone: isolated Cranelift local JIT experiment validated against the interpreter;
+W8 input-read proofs, W7 composition/facet contracts and SV0-B2 campaigns retained
+
+## Cranelift experiment
+
+- Isolated `experiments/cranelift-compiler` workspace compiles existing validated
+  `Executable` IR (including generated JVP/VJP) to native code; core is unchanged.
+  Checked bindings and reusable borrowed calls, strict f32/f64, affine layouts,
+  loops, predicates and ordered add/multiply reductions; unsupported IR refuses.
+- Direct Cranelift codegen/frontend/module/jit/native pins: `=0.128.3`; complete
+  transitive pins in experiment lockfile. Native code remains local/pointwise.
+- Validation 2026-10-18: core 39 tests; experiment 13 differential tests including
+  existing seven-check AD campaign; strict Clippy/rustdoc and formatting pass both.
+- Benchmark: 13 outputs match; checked native scalar guard 4.8x, 64 guards 108x,
+  1,024-input JVP/VJP 73x/65x, matvec64 48x; compile 185–276 us. Full protocol and
+  raw timings in experiment README/results. No full Boolean speedup claimed.
+- Ordinary floating point only: next is explicit interval/error-bound lowering
+  checked against exact guards; topology certificates remain consumer-owned.
 
 ## Current role
 
@@ -84,7 +100,7 @@ external operand, and composition binds buffers between verbatim kernels.
 
 ## Validation
 
-Passed locally on 2026-09-08:
+Core checks rerun successfully on 2026-10-18:
 
 - `cargo test --locked --workspace --all-targets`: 39 tests passed (1 unit; composition 9;
   facet_pair 6; output_dependency 6; structured_kernel 11; sv0_campaign 6).
