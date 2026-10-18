@@ -132,3 +132,57 @@ pub fn matvec(n: usize) -> StructuredKernel {
         numeric_policy: NumericPolicy::default(),
     }
 }
+
+/// Batched polynomials with independent coefficient buffers and one shared parameter.
+/// The explicit square lets interval lowering retain correlation across zero.
+pub fn polynomial_batch(n: usize) -> StructuredKernel {
+    let a = AxisId::new(0);
+    StructuredKernel {
+        name: format!("polynomial-batch-{n}"),
+        iteration_domain: IterationDomain::new(vec![n]),
+        iterators: vec![IteratorKind::Parallel],
+        operands: vec![
+            KernelOperand::tensor("c0", vec![n], AccessMode::Read),
+            KernelOperand::tensor("c1", vec![n], AccessMode::Read),
+            KernelOperand::tensor("c2", vec![n], AccessMode::Read),
+            KernelOperand::scalar("t", AccessMode::Read),
+            KernelOperand::tensor("value", vec![n], AccessMode::Write),
+        ],
+        indexing_maps: (0..5)
+            .map(|i| {
+                if i == 3 {
+                    IndexingMap::scalar(OperandId::new(i))
+                } else {
+                    IndexingMap::new(OperandId::new(i), vec![IndexExpr::axis(a)])
+                }
+            })
+            .collect(),
+        body: KernelRegion {
+            statements: vec![Statement::Store {
+                operand: OperandId::new(4),
+                value: ScalarExpr::binary(
+                    BinaryOp::Add,
+                    ScalarExpr::Load(OperandId::new(0)),
+                    ScalarExpr::binary(
+                        BinaryOp::Add,
+                        ScalarExpr::binary(
+                            BinaryOp::Mul,
+                            ScalarExpr::Load(OperandId::new(1)),
+                            ScalarExpr::Load(OperandId::new(3)),
+                        ),
+                        ScalarExpr::binary(
+                            BinaryOp::Mul,
+                            ScalarExpr::Load(OperandId::new(2)),
+                            ScalarExpr::binary(
+                                BinaryOp::Mul,
+                                ScalarExpr::Load(OperandId::new(3)),
+                                ScalarExpr::Load(OperandId::new(3)),
+                            ),
+                        ),
+                    ),
+                ),
+            }],
+        },
+        numeric_policy: NumericPolicy::default(),
+    }
+}

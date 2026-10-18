@@ -19,6 +19,7 @@ use malleus::*;
 use std::{cell::RefCell, collections::BTreeMap};
 
 pub mod fixtures;
+pub mod interval;
 
 /// Explicit refusal or checked-call error; unsupported IR never falls back silently.
 #[derive(Debug, thiserror::Error)]
@@ -144,10 +145,23 @@ impl JitKernel {
 
     /// Validate all bindings before entering generated code, including offsets, order,
     /// missing/duplicate operands and lengths. Mutable slice borrows prohibit safe aliasing.
-    pub fn prepare<'j, 'b, 'v>(
+    pub fn prepare<'j, 'b>(
         &'j self,
-        bindings: &'b mut [BufferBinding<'v>],
-    ) -> Result<PreparedCall<'j, 'b, 'v>> {
+        bindings: &'b mut [BufferBinding<'_>],
+    ) -> Result<PreparedCall<'j, 'b>> {
+        let bindings = bindings
+            .iter_mut()
+            .map(|b| BufferBinding::new(b.operand, &mut *b.values))
+            .collect();
+        self.prepare_owned(bindings)
+    }
+
+    /// Own the binding descriptors while borrowing their buffers. This supports returning
+    /// a prepared session without borrowing a temporary descriptor array.
+    pub fn prepare_owned<'j, 'v>(
+        &'j self,
+        mut bindings: Vec<BufferBinding<'v>>,
+    ) -> Result<PreparedCall<'j, 'v>> {
         let k = self.executable.kernel().as_kernel();
         let mut pointers: Vec<*mut f64> = vec![std::ptr::null_mut(); k.operands.len()];
         for binding in bindings.iter_mut() {
@@ -187,12 +201,47 @@ impl JitKernel {
 }
 
 /// A reusable call holding all buffer borrows and the code owner alive.
-pub struct PreparedCall<'j, 'b, 'v> {
+pub struct PreparedCall<'j, 'v> {
     kernel: &'j JitKernel,
-    _bindings: &'b mut [BufferBinding<'v>],
+    _bindings: Vec<BufferBinding<'v>>,
     pointers: Vec<*mut f64>,
 }
-impl PreparedCall<'_, '_, '_> {
+impl PreparedCall<'_, '_> {
+    /// Change a readable input without reallocating or invalidating any borrowed buffer.
+    /// Output and ReadWrite operands are refused; writes are bounds-checked.
+    pub fn update_input(&mut self, id: OperandId, offset: usize, values: &[f64]) -> Result<()> {
+        let k = self.kernel.executable.kernel().as_kernel();
+        let op = k
+            .operands
+            .get(id.index())
+            .ok_or_else(|| Error::Binding("unknown input".into()))?;
+        if op.access != AccessMode::Read {
+            return Err(Error::Binding("update requires Read input".into()));
+        }
+        let binding = self
+            ._bindings
+            .iter_mut()
+            .find(|b| b.operand == id)
+            .ok_or_else(|| Error::Binding("missing input".into()))?;
+        let end = offset
+            .checked_add(values.len())
+            .ok_or_else(|| Error::Binding("input offset overflow".into()))?;
+        let target = binding
+            .values
+            .get_mut(offset..end)
+            .ok_or_else(|| Error::Binding("input update out of bounds".into()))?;
+        target.copy_from_slice(values);
+        Ok(())
+    }
+
+    /// Inspect a bound buffer between invocations; no mutable pointer escapes.
+    pub fn values(&self, id: OperandId) -> Option<&[f64]> {
+        self._bindings
+            .iter()
+            .find(|b| b.operand == id)
+            .map(|b| &*b.values)
+    }
+
     /// Execute without repeated binding allocation/checks. Reductions accumulate into
     /// caller-owned outputs, exactly like the interpreter; they are not reset implicitly.
     pub fn run(&mut self) {

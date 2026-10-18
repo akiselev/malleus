@@ -18,8 +18,13 @@ W8 input-read proofs, W7 composition/facet contracts and SV0-B2 campaigns retain
 - Benchmark: 13 outputs match; checked native scalar guard 4.8x, 64 guards 108x,
   1,024-input JVP/VJP 73x/65x, matvec64 48x; compile 185–276 us. Full protocol and
   raw timings in experiment README/results. No full Boolean speedup claimed.
-- Ordinary floating point only: next is explicit interval/error-bound lowering
-  checked against exact guards; topology certificates remain consumer-owned.
+- Explicit outward interval lowering now emits ordinary strict f64 endpoint IR
+  for Read/Write neg/add/sub/mul kernels, including correlated squares. FP environment
+  probe, conservative overflow/NaN widening and typed capability/budget refusals.
+  Owned prepared bindings support checked Read-input updates and output inspection.
+- Experiment validation: 17 tests; CADabra cross-checks exact whole-interval extrema
+  and actual generated JVP bounds. See `INTERVALS.md`; topology certification and
+  geometric event policy remain consumer-owned, and the core crate is unchanged.
 
 ## Current role
 

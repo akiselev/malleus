@@ -119,3 +119,13 @@ lower an explicit interval/error-bound guard kernel to Malleus and cross-check i
 enclosures against Resolvent exact arithmetic before allowing it to issue tokens.
 Keep topology and token ownership in Cadabra; Malleus should only execute local
 numeric kernels.
+
+## Bounded arithmetic integration (2026-10-18)
+
+[INTERVALS.md](INTERVALS.md) describes the new explicit endpoint/error-bound pass,
+its roundoff argument and limits, and the CADabra exact-arithmetic integration.
+The prototype now has 17 passing tests. Reusable calls can safely update Read
+inputs and inspect outputs between invocations. The original plain-arithmetic
+benchmark above is retained as historical data for the initial compiler commit;
+the bounded-kernel comparison and native Rust fast-path repair have separate
+results in CADabra's experiment.
