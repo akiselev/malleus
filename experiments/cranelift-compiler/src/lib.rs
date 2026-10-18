@@ -19,7 +19,6 @@ use malleus::*;
 use std::{cell::RefCell, collections::BTreeMap};
 
 pub mod fixtures;
-pub mod interval;
 
 /// Explicit refusal or checked-call error; unsupported IR never falls back silently.
 #[derive(Debug, thiserror::Error)]

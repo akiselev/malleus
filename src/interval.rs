@@ -4,8 +4,9 @@
 //! reassociation. Every arithmetic endpoint is padded outwards; this is deliberately
 //! wider than nextafter-based interval arithmetic. See INTERVALS.md for the proof.
 
-use crate::{Error, Result};
-use malleus::*;
+use crate::LoweringError as Error;
+use crate::*;
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone)]
 struct Pair {
@@ -232,6 +233,10 @@ impl Lift {
                 Pair { lo: ScalarExpr::Load(lo), hi: ScalarExpr::Load(hi) }
             }
             ScalarExpr::Local(id) => self.locals[id.index()].clone(),
+            ScalarExpr::Select { condition, if_true, if_false } if index_predicate(condition) => {
+                let a=self.expr(if_true,depth+1)?;let b=self.expr(if_false,depth+1)?;
+                Pair {lo:self.emit(choose((**condition).clone(),a.lo,b.lo)),hi:self.emit(choose((**condition).clone(),a.hi,b.hi))}
+            }
             ScalarExpr::Unary { op: UnaryOp::Neg, arg } => {
                 let a = self.expr(arg, depth + 1)?;
                 Pair { lo: ScalarExpr::unary(UnaryOp::Neg, a.hi), hi: ScalarExpr::unary(UnaryOp::Neg, a.lo) }
@@ -260,5 +265,19 @@ impl Lift {
             }
             _ => return Err(Error::Unsupported("interval expression (only finite constants, indices, loads, locals, neg/add/sub/mul)".into())),
         })
+    }
+}
+
+// Branches depending only on exact iteration coordinates are determinate for every
+// interval input. Data-dependent predicates still require explicit branch enclosures.
+fn index_predicate(p: &Predicate) -> bool {
+    match p {
+        Predicate::Constant(_) => true,
+        Predicate::Compare { lhs, rhs, .. } => {
+            matches!(**lhs, ScalarExpr::Index(_) | ScalarExpr::Constant(_))
+                && matches!(**rhs, ScalarExpr::Index(_) | ScalarExpr::Constant(_))
+        }
+        Predicate::Not(x) => index_predicate(x),
+        Predicate::And(a, b) | Predicate::Or(a, b) => index_predicate(a) && index_predicate(b),
     }
 }

@@ -21,7 +21,9 @@ mod digest;
 mod executable;
 mod facet;
 mod interpreter;
+pub mod interval;
 mod ir;
+mod rust;
 mod validate;
 
 pub use campaign::{
@@ -62,3 +64,5 @@ pub use ir::{
     ScalarType, Statement, StructuredKernel, StructuredModule, UnaryOp,
 };
 pub use validate::{ValidatedKernel, ValidatedModule, ValidationError, validate, validate_module};
+
+pub use rust::{LoweringError, lower_rust, lower_rust_unrolled};

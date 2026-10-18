@@ -1,6 +1,6 @@
 # Explicit interval lowering
 
-`interval::lower_intervals` transforms a validated strict f64 Malleus kernel into
+`malleus::interval::lower_intervals` (promoted to the core) transforms a validated strict f64 Malleus kernel into
 another validated Malleus kernel. It introduces endpoint operands and ordinary
 arithmetic, comparisons, selects and locals. Both the reference interpreter and
 Cranelift run that exact IR. No new numeric IR, core dependency, external interval

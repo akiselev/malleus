@@ -129,3 +129,5 @@ inputs and inspect outputs between invocations. The original plain-arithmetic
 benchmark above is retained as historical data for the initial compiler commit;
 the bounded-kernel comparison and native Rust fast-path repair have separate
 results in CADabra's experiment.
+
+The interval pass is now in the core `malleus::interval` API and is shared by the Rust source backend. See the root `RUST-BACKEND.md`; the core emitter adds no native compiler dependencies.

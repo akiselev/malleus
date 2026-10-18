@@ -1,5 +1,6 @@
+use malleus::interval::*;
 use malleus::*;
-use malleus_cranelift_experiment::{JitKernel, fixtures, interval::*};
+use malleus_cranelift_experiment::{JitKernel, fixtures};
 
 fn execute(e: &Executable, buffers: &mut [Vec<f64>], native: bool) {
     let mut b: Vec<_> = buffers

@@ -2,29 +2,29 @@
 
 Updated: 2026-10-18
 Branch: `master`
-Milestone: isolated Cranelift local JIT experiment validated against the interpreter;
+Milestone: strict Rust source/unrolled lowering and core interval lowering;
 W8 input-read proofs, W7 composition/facet contracts and SV0-B2 campaigns retained
 
-## Cranelift experiment
+## Local backends
 
-- Isolated `experiments/cranelift-compiler` workspace compiles existing validated
-  `Executable` IR (including generated JVP/VJP) to native code; core is unchanged.
-  Checked bindings and reusable borrowed calls, strict f32/f64, affine layouts,
-  loops, predicates and ordered add/multiply reductions; unsupported IR refuses.
-- Direct Cranelift codegen/frontend/module/jit/native pins: `=0.128.3`; complete
-  transitive pins in experiment lockfile. Native code remains local/pointwise.
-- Validation 2026-10-18: core 39 tests; experiment 13 differential tests including
-  existing seven-check AD campaign; strict Clippy/rustdoc and formatting pass both.
-- Benchmark: 13 outputs match; checked native scalar guard 4.8x, 64 guards 108x,
-  1,024-input JVP/VJP 73x/65x, matvec64 48x; compile 185–276 us. Full protocol and
-  raw timings in experiment README/results. No full Boolean speedup claimed.
-- Explicit outward interval lowering now emits ordinary strict f64 endpoint IR
-  for Read/Write neg/add/sub/mul kernels, including correlated squares. FP environment
-  probe, conservative overflow/NaN widening and typed capability/budget refusals.
-  Owned prepared bindings support checked Read-input updates and output inspection.
-- Experiment validation: 17 tests; CADabra cross-checks exact whole-interval extrema
-  and actual generated JVP bounds. See `INTERVALS.md`; topology certification and
-  geometric event policy remain consumer-owned, and the core crate is unchanged.
+- Core `lower_rust` emits standalone safe Rust over checked operand-order slices,
+  f32/f64 operation precision, affine layouts/regions, predicates, ordered effects
+  and all reference reductions. `lower_rust_unrolled` preserves traversal while
+  expanding at most 64 iterations under a source-size budget. Core dependencies
+  are unchanged. See `RUST-BACKEND.md`.
+- Explicit outward `interval::lower_intervals` moved from the compiler experiment
+  into the core. Strict f64 Read/Write neg/add/sub/mul, correlated squares and
+  index-only branches; FP-environment probe, conservative nonfinite widening and
+  typed capability/budget refusals. No alternate numeric IR or compatibility facade.
+- Validation: core 41 tests, including rustc-compiled looped/unrolled differential
+  kernels; isolated Cranelift 17 tests. Strict Clippy/rustdoc/formatting checks pass.
+- Isolated `experiments/cranelift-compiler` still lowers existing `Executable` and
+  generated JVP/VJP IR; checked/borrowed calls, input updates and explicit refusals.
+  Direct Cranelift codegen/frontend/module/jit/native pins remain `=0.128.3`, full
+  transitive versions in its lockfile; native dependencies stay outside the core.
+- CADabra consumes both backends for exact-checked geometric guards, discovered
+  degree-mask specialization and full Boolean profiling. Geometry/event/topology
+  authority remains in CADabra; exact coefficient algebra remains Resolvent-owned.
 
 ## Current role
 
