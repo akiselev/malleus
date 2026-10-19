@@ -3,6 +3,21 @@
 //! Requires round-to-nearest/ties-even and gradual underflow, with no contraction or
 //! reassociation. Every arithmetic endpoint is padded outwards; this is deliberately
 //! wider than nextafter-based interval arithmetic. See INTERVALS.md for the proof.
+//!
+//! # Input contract of lowered kernels
+//!
+//! A lowered kernel (run by the interpreter, the Rust source backend or any other backend)
+//! is sound only when all of the following hold; none is checked at run time:
+//!
+//! - every input interval is given as ordered endpoints, `lo <= hi`, and neither endpoint is
+//!   NaN (infinite endpoints are allowed and widen the result conservatively);
+//! - the input interval encloses the exact value of its operand;
+//! - the caller has checked [`ieee_environment_supported`] on the thread that runs the
+//!   kernel and the floating-point environment does not change during the call.
+//!
+//! Given these, every output interval encloses the real-number result of the source kernel
+//! for every real choice of the inputs within their intervals. Output endpoints are never
+//! NaN; overflow and nonfinite intermediate values widen to infinite endpoints.
 
 use crate::LoweringError as Error;
 use crate::*;
@@ -15,7 +30,8 @@ struct Pair {
 }
 
 /// Operand `i` becomes endpoints `2*i` and `2*i+1`, preserving shape/layout/region.
-/// Callers must supply ordered, non-NaN input endpoints enclosing their exact data.
+/// Callers must supply ordered, non-NaN input endpoints enclosing their exact data and
+/// must have checked [`ieee_environment_supported`]; see the module documentation.
 pub struct IntervalProgram {
     /// Ordinary validated Malleus IR, runnable by both interpreter and Cranelift.
     pub executable: Executable,

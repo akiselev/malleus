@@ -86,7 +86,7 @@ canonical versus schedule-defined reductions, scalar domains, signed zeros,
 NaNs/infinities, every admitted arithmetic/comparison operation, multiply reductions,
 ReadWrite effects, repeated prepared calls, malformed bindings and unsupported
 schedules. An adversarial rounding test checks that forbidden FMA is not introduced.
-The unchanged core suite has 39 tests. Strict Clippy and rustdoc checks also pass
+The core suite now has 45 tests (see the root `STATUS.md`). Strict Clippy and rustdoc checks also pass
 for both workspaces.
 
 ## Consequence for Cadabra guards and dragging
@@ -124,7 +124,8 @@ numeric kernels.
 
 [INTERVALS.md](INTERVALS.md) describes the new explicit endpoint/error-bound pass,
 its roundoff argument and limits, and the CADabra exact-arithmetic integration.
-The prototype now has 17 passing tests. Reusable calls can safely update Read
+The prototype now has 18 passing tests, including a seeded random interpreter-versus-JIT
+differential over generated interval programs. Reusable calls can safely update Read
 inputs and inspect outputs between invocations. The original plain-arithmetic
 benchmark above is retained as historical data for the initial compiler commit;
 the bounded-kernel comparison and native Rust fast-path repair have separate

@@ -16,8 +16,14 @@ W8 input-read proofs, W7 composition/facet contracts and SV0-B2 campaigns retain
   into the core. Strict f64 Read/Write neg/add/sub/mul, correlated squares and
   index-only branches; FP-environment probe, conservative nonfinite widening and
   typed capability/budget refusals. No alternate numeric IR or compatibility facade.
-- Validation: core 41 tests, including rustc-compiled looped/unrolled differential
-  kernels; isolated Cranelift 17 tests. Strict Clippy/rustdoc/formatting checks pass.
+- Validation: core 45 tests, including rustc-compiled looped/unrolled differential
+  kernels, seeded randomized interval enclosure soundness against exact rationals
+  (with an inward-shrink negative control) and a random interpreter-vs-Rust-source
+  interval differential; isolated Cranelift 18 tests (adds a random interpreter-vs-JIT
+  interval differential). `PreparedCall::run` re-derives its raw pointers each call.
+  Lowered interval kernels' input contract (ordered non-NaN endpoints, caller checks
+  `ieee_environment_supported()`) is in the `interval` module docs. Core test support
+  lives in `tests/support/` (no dependency on `experiments/`). Clippy/formatting pass.
 - Isolated `experiments/cranelift-compiler` still lowers existing `Executable` and
   generated JVP/VJP IR; checked/borrowed calls, input updates and explicit refusals.
   Direct Cranelift codegen/frontend/module/jit/native pins remain `=0.128.3`, full

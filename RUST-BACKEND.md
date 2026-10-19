@@ -71,13 +71,18 @@ Resolvent owns their exact reference mathematics. Malleus owns execution/lowerin
 
 ## Validation
 
-The core test suite has 41 tests. The source differential test emits and compiles
+The core test suite has 45 tests. The source differential test emits and compiles
 42 kernels with rustc -O (looped and unrolled variants), executes them, and compares
 all buffers against the interpreter. It includes primal/JVP/VJP, f32/f64, reductions,
 lazy branches, IEEE inputs, an adversarial FMA case, dense matvec, reversed indexing
 and nonzero regions. A short input is rejected before output mutation. Another
 test rejects symbol injection, keywords and unsupported scheduling. The isolated
-Cranelift suite retains 17 tests using the promoted interval API.
+Cranelift suite has 18 tests using the promoted interval API. Two further core tests
+cover the interval pass itself: `tests/interval_soundness.rs` checks 2,000 random lowered
+kernels against exact dyadic-rational values at corners, midpoints and random interior
+points (with a negative control that must flag bounds shrunk inward by 3 ulps), and
+`tests/interval_differential.rs` compiles random lowered programs with rustc and compares
+them bitwise to the interpreter. Both are seeded and deterministic.
 
 The CADabra Rust/source integration adds exact extrema, generated parameter JVPs,
 actual Boolean observations, budgeted event searches and parameter-box subdivision.

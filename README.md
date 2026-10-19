@@ -51,6 +51,11 @@ system vocabulary. It has no dependencies on the rest of the Sinbad ecosystem.
 - `check_numeric_policy_mutation` retains explicit f64-to-f32, f32-to-f64, and reduction-order
   mutations and reports detection only when the mutated local result leaves the declared
   tolerance.
+- `interval::lower_intervals` lifts a strict f64 Read/Write kernel to outward-rounded endpoint
+  kernels. Input contract: endpoints are ordered (`lo <= hi`) and not NaN, they enclose the
+  exact data, and the caller has checked `interval::ieee_environment_supported()` for the
+  thread that runs the kernel (no run-time check is made). See `INTERVALS.md`
+  (`experiments/cranelift-compiler/INTERVALS.md`) and `RUST-BACKEND.md`.
 - `DerivativeRequest` selects independent and dependent operands; JVP and VJP
   are implemented as IR-to-IR passes, while materialized Jacobians are an
   explicit unsupported mode. `DerivativeProduct::primal_operands` maps every
