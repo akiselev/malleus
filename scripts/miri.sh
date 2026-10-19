@@ -12,4 +12,6 @@ run -p malleus --test structured_kernel
 run -p malleus --test prepared -- malformed_bindings every_kernel_of_a_module prepared_compositions
 run -p malleus --test policy -- explicit_fma default_level validation_refuses
 run -p malleus --test export -- symbolic_schema fpcore_goldens oversized
+run -p malleus --test derivative_options -- refuse_names jacobian_layout simplification_rewrites jvp_reads
+run -p malleus --test schedule -- injectivity_is_decided vectorize_refusals
 run -p malleus-cranelift --lib

@@ -28,7 +28,9 @@ mod ir;
 pub mod policy;
 pub mod prepared;
 pub mod rust;
+pub mod schedule;
 pub mod simplify;
+pub mod smt;
 pub mod symbolic;
 mod validate;
 

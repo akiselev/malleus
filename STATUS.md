@@ -2,8 +2,8 @@
 
 Updated: 2026-10-19
 Branch: `master`
-Milestone: W11 M3 nonsmooth policy, Jacobian mode, exact post-AD simplification
-(`malleus::{ad, simplify}`); W11 M4 interval upgrades (successor-bound padding, centered and affine
+Milestone: W11 M3 nonsmooth policy, Jacobian mode, exact post-AD simplification, checked
+schedules, SMT translation validation (`malleus::{ad, simplify, schedule, smt}`, VERIFICATION.md); W11 M4 interval upgrades (successor-bound padding, centered and affine
 enclosures) and FPCore/symbolic export; W11 M2 numeric policy levels, explicit `Fma`, portable transcendentals; W11 M1
 prepared kernels and batched execution (`EXECUTION.md`); strict Rust
 source/unrolled and core interval lowering; W8/W7/SV0-B2 contracts retained
@@ -39,11 +39,26 @@ source/unrolled and core interval lowering; W8/W7/SV0-B2 contracts retained
   read-write operands), dead `Write` stores overwritten later, `-0` stores into `Reduce(Add)`
   and `1` into `Reduce(Multiply)`. Never `x+0`, `x*0`, `+0` reduce stores, reassociation.
   Opt-in only (`Simplification::Exact`): default derivative kernels and digests are unchanged.
-- Proof: `tests/derivative_options.rs` (7): default options == `differentiate` on every
-  fixture family; refusal sites; Jacobian == identity-seed JVPs on fixtures + 40 random
-  kernels (and batched); simplified == unsimplified bitwise on fixtures + 300 random kernels
-  (abs/min/max/sqrt/div/fma/select/floor, f32 and f64) with NaN/inf/+-0 inputs, for primal,
-  JVP, VJP and Jacobian kernels.
+- Proof: `tests/derivative_options.rs` (7; fixtures + 300 random kernels with NaN/inf/+-0,
+  f32/f64, primal/JVP/VJP/Jacobian; Jacobian also through `run_batch`).
+
+## W11 M3 schedules and translation validation (`malleus::{schedule, smt}`, VERIFICATION.md)
+
+- `schedule::{prove_write_injective(&kernel, axis) -> InjectivityProof { axis, strides },
+  VectorizedKernel { new(&Executable, axis), run, run_parallel(bindings, threads), axis },
+  ScheduleError { Invalid, InvalidAxis, NotInjective { operand, witness }, NotProvable,
+  AxisUsedAsValue, NegativeStride, UnbatchableLayout, ScheduleDefinedOrder, Prepare },
+  INJECTIVITY_BUDGET = 2^16}`. Exact integer decision of write injectivity along an axis
+  (witness pair on failure); `vectorize` runs lanes via `run_batch` on a derived kernel;
+  `parallel` uses `std::thread::scope` on private buffer copies, copying back each lane
+  range's own elements (deterministic; reductions never shared). Bitwise equal to the
+  interpreter (`tests/schedule.rs`, 3). `KernelSchedule`/`Executable` are unchanged.
+- `smt::{equivalence_query, check, validate_rewrite, validate_contraction, Semantics {
+  Reference, DeclaredContraction }, TvOutcome { Validated, Counterexample, NotValidated },
+  SmtError}`: SMT-LIB 2 FloatingPoint encoding, equality modulo NaN payload, z3 as an external
+  process (`/usr/bin/z3`, Z3 4.16.0; no dependency). Validates `simplify_exact` on post-AD and
+  random kernels and `contract_fma` against its declared fused semantics; negative controls
+  yield counterexamples (`tests/smt.rs`, 5; ~45 s; random: 18 of 20 validated, 2 timed out).
 
 ## Numeric policy levels (W11 M2, module `malleus::policy`)
 
@@ -129,18 +144,13 @@ source/unrolled and core interval lowering; W8/W7/SV0-B2 contracts retained
   (`JitKernel::{compile, prepare, prepare_owned, run}`, `PreparedCall::{update_input, values,
   run}`, `fixtures::{buffers, polynomial_batch}`). Cranelift pins `=0.128.3`; root
   `Cargo.lock` now holds the workspace (core versions unchanged, additions only).
-- CADabra consumes both backends for exact-checked geometric guards, discovered
-  degree-mask specialization and full Boolean profiling. Geometry/event/topology
-  authority remains in CADabra; exact coefficient algebra remains Resolvent-owned.
+- CADabra consumes both backends (exact-checked guards, degree-mask specialization).
 
 ## Current role
 
-Malleus owns backend-independent, finite-precision local kernel IR, structural
-validation, scheduling contracts, reference execution, and the local AD products
-over them. It does not own a scientific language, mesh topology, finite-element
-spaces, global assembly, solver policy, coupled state, or simulation history. It
-has no port, connector, or system vocabulary: a bound model input is an opaque
-external operand, and composition binds buffers between verbatim kernels.
+Backend-independent finite-precision local kernel IR, validation, scheduling contracts,
+reference execution and local AD; no language, mesh, spaces, assembly, solver policy, coupled
+state, history, or port/system vocabulary (composition binds buffers between verbatim kernels).
 
 ## Implemented
 
@@ -184,16 +194,10 @@ external operand, and composition binds buffers between verbatim kernels.
   `FacetPairKernel { kernel, roles: Vec<FacetOperandRole> }` with
   `FacetOperandRole::Cell { side: Minus|Plus, partner: Option<OperandId> } | Facet { parity:
   Even|Odd }`. The only convention Malleus fixes is `FACET_NORMAL_CONVENTION = "minus_to_plus"`:
-  odd facet data (the normal, oriented fluxes) negates under side relabelling. A side-owned
-  outward flux datum (the port unknown in the dual trace space) is a `Cell` operand of its
-  owner; the balance row between the two owners is an `Even` facet output.
-  `validate_facet_pair` checks role count, presence of both sides, symmetric partners with equal
-  shape/layout/region/access, and no odd non-additive reduction outputs.
-  `check_facet_swap_symmetry` proves swap covariance by executing the kernel with the sides
-  exchanged and reports per-output deviations (a wrong parity declaration is detected, an
-  unpaired cell operand is refused). `differentiate_facet_pair` carries roles onto derivative
-  operands (partners survive only when both sides are requested). `facet_pair_digest`
-  (`malleus-facet-pair-kernel/1`) covers the inner kernel digest, roles, and convention.
+  odd facet data negates under side relabelling. `validate_facet_pair` (role count, both sides,
+  symmetric partners, no odd non-additive reductions), `check_facet_swap_symmetry` (executes
+  with sides exchanged, reports deviations), `differentiate_facet_pair`, `facet_pair_digest`
+  (`malleus-facet-pair-kernel/1`).
 - A module-complete `run_local_differential_campaign` API (SV0-B2) comparing primal, JVP, VJP,
   and parameter-only JVP execution between the interpreter and a distinct version-identified
   `LocalExecutableRunner`, with centered differences, the adjoint identity, explicit tolerances,
@@ -205,10 +209,10 @@ external operand, and composition binds buffers between verbatim kernels.
 
 Checks rerun on 2026-10-19 (W11 M3 clone, `CARGO_PROFILE_TEST_OPT_LEVEL=2`, `CARGO_BUILD_JOBS=4`):
 
-- `cargo test -p malleus --locked`: 83 passed (1 unit; composition 9; derivative_options 7;
+- `cargo test -p malleus --locked`: 91 passed (1 unit; composition 9; derivative_options 7;
   digest_pins 1; export 8; facet_pair 6; interval_differential 1; interval_enclosures 5;
   interval_padding 2; interval_soundness 3; output_dependency 6; policy 6; prepared 5;
-  prepared_alloc 1; rust_source 4; structured_kernel 11; sv0_campaign 7). `prepared_alloc`
+  prepared_alloc 1; rust_source 4; schedule 3; smt 5; structured_kernel 11; sv0_campaign 7). `prepared_alloc`
   failed once under host contention (its global allocation counter is process-wide) and
   passed on 3 reruns; pre-existing, not touched by M3.
 - `cargo test -p malleus-cranelift --locked`: 28 passed (3 unit; alloc 1; differential 13;
@@ -218,7 +222,8 @@ Checks rerun on 2026-10-19 (W11 M3 clone, `CARGO_PROFILE_TEST_OPT_LEVEL=2`, `CAR
 - Miri (`scripts/miri.sh`, `MIRIFLAGS=-Zmiri-deterministic-floats`, Stacked Borrows; last full
   run W11 M2/M4 2026-10-19, no UB): core `--lib`, `structured_kernel`, `prepared`/`policy`/
   `export` subsets, `malleus-cranelift --lib`. Excluded for runtime: `prepared_alloc`,
-  `interval_soundness`; JIT integration tests are `#![cfg(not(miri))]`.
+  `interval_soundness`; JIT integration tests and `smt` are `#![cfg(not(miri))]`. W11 M3 added
+  `derivative_options` (4) and `schedule` (2) subsets; both ran under miri on 2026-10-19, no UB.
 
 ## Prepared execution measurements (W11 M1)
 
@@ -249,13 +254,8 @@ borrowed `PreparedCall::run`.
 - `FacetPairKernel`, `FacetOperandRole`, `FacetSide`, `SwapParity`, `FACET_NORMAL_CONVENTION`,
   `FacetPairDerivativeProduct`, `FacetSwapReport`, `FacetPairError`, `FacetSwapError`.
 - `DerivativeProduct::primal_operands` (additive).
-- W11 M1 (additive, no serialized form, module `malleus::prepared` only; new root-level
-  names: only the module name `prepared`): `PreparedKernel { new, run, call, run_batch,
-  read_operands, write_operands, required_len, state }`, `PreparedState`, `ReadBinding` /
-  `WriteBinding { operand, values, stride }`, `BATCH_BLOCK = 32`, `CallError { ReadCount,
-  WriteCount, ReadOperand, WriteOperand, ShortBuffer, ExtentOverflow }`, `PrepareError {
-  AddressOutOfRange, ProgramTooLarge }`, `PreparedModule`, `PreparedComposition`,
-  `CompositionState`, `PreparedRunner` (identity `malleus-prepared/bytecode-v1`).
+- W11 M1-M4 and M3 shapes: module-scoped only (`prepared`, `policy`, `rust`, `interval`,
+  `symbolic`, `fpcore`, `ad`, `simplify`, `schedule`, `smt`); see the sections above.
 
 ## Deviations from `sinbad/ARCHITECTURE.md` and why
 
@@ -288,5 +288,7 @@ borrowed `PreparedCall::run`.
   typed lowering budget, <2% of random 4-input programs).
 - Differentiation through read-write operands remains a refusal; compositions refuse
   Jacobian mode and take no `DerivativeOptions` yet.
-- Bounds and simple injective-write maps are proved conservatively; general affine
-  injectivity remains future work before production parallel schedules.
+- Schedules (M3): only one axis per `VectorizedKernel`; `KernelSchedule::{vectorization,
+  parallel}` are not yet consumed by `PreparedKernel`/JIT; `parallel` copies whole writable
+  buffers per thread (fine for local kernels, not for large outputs). SMT: symbolic-DAG export
+  equivalence not validated; Float64 counterexample search can time out (`NotValidated`).
