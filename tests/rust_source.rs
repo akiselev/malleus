@@ -1,9 +1,9 @@
 //! Compile emitted safe Rust with rustc, then compare all buffers to the interpreter.
 use malleus::*;
-use std::{fmt::Write, fs, process::Command};
-#[allow(dead_code)]
-#[path = "../experiments/cranelift-compiler/src/fixtures.rs"]
-mod fixtures;
+use std::fmt::Write;
+
+mod support;
+use support::{fixtures, rustc_run};
 
 #[test]
 fn compiled_rust_matches_interpreter_primal_ad_policies_and_ieee_inputs() {
@@ -156,26 +156,7 @@ fn compiled_rust_matches_interpreter_primal_ad_policies_and_ieee_inputs() {
     }
     main.push_str("}\n");
     code.push_str(&main);
-    let dir = std::env::temp_dir().join(format!("malleus-rust-source-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("kernels.rs"), code).unwrap();
-    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-    let compiled = Command::new(rustc)
-        .arg("--edition=2024")
-        .arg("-O")
-        .arg(dir.join("kernels.rs"))
-        .arg("-o")
-        .arg(dir.join("kernels"))
-        .output()
-        .unwrap();
-    assert!(
-        compiled.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compiled.stderr)
-    );
-    let run = Command::new(dir.join("kernels")).output().unwrap();
-    assert!(run.status.success());
-    let stdout = String::from_utf8(run.stdout).unwrap();
+    let stdout = rustc_run("rust-source", &code);
     assert_eq!(stdout.lines().count(), expected.len());
     for (line, reference) in stdout.lines().zip(expected) {
         let output: Vec<Vec<u64>> = serde_json::from_str(line).unwrap();
@@ -186,7 +167,6 @@ fn compiled_rust_matches_interpreter_primal_ad_policies_and_ieee_inputs() {
             );
         }
     }
-    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
