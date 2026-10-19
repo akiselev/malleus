@@ -10,6 +10,9 @@ readme = "README.md"
 keywords = ["compiler", "kernel", "numerics", "simulation"]
 categories = ["compilers", "science"]
 
+[workspace]
+members = ["crates/malleus-cranelift"]
+
 [dependencies]
 blake3 = "1"
 libm = { version = "=0.2.16", default-features = false }

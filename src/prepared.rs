@@ -655,6 +655,19 @@ impl PreparedKernel {
         }
     }
 
+    /// The binding checks of [`run_batch`](Self::run_batch) (`points = 1` for
+    /// [`call`](Self::call)) without executing anything. A native backend implementing the
+    /// same positional batch ABI reuses them so that it accepts and refuses exactly the
+    /// bindings this kernel does.
+    pub fn check_bindings(
+        &self,
+        points: usize,
+        reads: &[ReadBinding<'_>],
+        writes: &[WriteBinding<'_>],
+    ) -> Result<(), CallError> {
+        self.check(points, reads, writes)
+    }
+
     fn check(
         &self,
         points: usize,

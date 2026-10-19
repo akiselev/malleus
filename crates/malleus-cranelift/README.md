@@ -1,58 +1,62 @@
-# Malleus Cranelift compiler experiment
+# malleus-cranelift
 
-This is a working local JIT backend for Malleus's existing `Executable`, including
-kernels produced by its JVP/VJP differentiation. It lowers validated Malleus IR to
-Cranelift machine code; it does not interpret another expression language. The
-core crate and its dependencies are unchanged. This isolated workspace contains
-the native dependency and unsafe ABI boundary.
+Optional Cranelift JIT backend for Malleus's validated `Executable`, including kernels
+produced by JVP/VJP differentiation and FMA contraction. It is a workspace member
+(`crates/malleus-cranelift`, package `malleus-cranelift`) and never a dependency of the
+`malleus` core, which stays dependency-light and free of unsafe code. Promoted from
+`experiments/cranelift-compiler` in W11 M2 (no facade remains).
 
 ## Reproduce
 
-From the repository root, using Rust 1.93.0 on a 64-bit native host:
+From the repository root, using Rust 1.93+ on a 64-bit native host:
 
 ```sh
-cargo test --manifest-path experiments/cranelift-compiler/Cargo.toml --locked
-cargo run --manifest-path experiments/cranelift-compiler/Cargo.toml --locked --quiet > results.json
-cargo clippy --manifest-path experiments/cranelift-compiler/Cargo.toml --all-targets --locked -- -D warnings
-RUSTDOCFLAGS='-D warnings' cargo doc --manifest-path experiments/cranelift-compiler/Cargo.toml --locked --no-deps
+cargo test -p malleus-cranelift --locked
+cargo run -p malleus-cranelift --release --locked --quiet > crates/malleus-cranelift/results.json
+cargo clippy -p malleus-cranelift --all-targets --locked -- -D warnings
+RUSTDOCFLAGS='-D warnings' cargo doc -p malleus-cranelift --locked --no-deps
 ```
 
-The benchmark configuration intentionally compiles the core interpreter at Rust
-`opt-level=3`, the prototype host at `opt-level=1`, and native code with Cranelift
-`opt_level=speed`. Do not compare against an unoptimized interpreter. Direct
-Cranelift codegen/frontend/module/jit/native dependencies are pinned to 0.128.3;
-`Cargo.lock` records every transitive version, including compatible 0.128.4 crates.
+Direct Cranelift codegen/frontend/module/jit/native dependencies are pinned to `=0.128.3`;
+the workspace `Cargo.lock` records every transitive version.
 
 ## Implemented contract
 
-- f32/f64 local arithmetic: constants, indices, loads, ordered locals, negation,
-  absolute value, square root, floor/ceil, add/subtract/multiply/divide.
-- Lazy selects and short-circuit predicates, all six comparisons, not/and/or.
-- Sequential nested loops, affine addressing with signed coefficients, arbitrary
-  validated dense layouts, buffer regions, Write/ReadWrite stores, additive and
-  multiplicative reductions. Canonical reduction order overrides loop permutation;
-  schedule-defined reduction order follows the declared permutation.
-- f32 operations use native f32 instructions, with conversion from/to the core's
-  f64 buffer ABI. No implicit FMA or reassociation. NaN payload preservation is not
-  promised (the comparison considers any two NaNs equivalent).
-- `JitKernel::run` checks binding identities, duplicates, lengths and completeness.
-  `prepare` performs these checks once and borrows buffers plus the code owner for
-  repeated calls. Neither API implicitly clears reduction outputs.
-- Machine-code pointers stay private. The owning module is retained during calls
-  and freed on drop, including compilation failures. Validated affine bounds,
-  checked bindings and conservative IR/address budgets protect native accesses.
-- `CampaignRunner` implements the existing `LocalExecutableRunner`; its in-memory
-  cache uses the kernel digest and complete schedule. It feeds the actual Malleus
-  differential campaign, rather than a replacement campaign.
+- Everything the reference interpreter executes, bitwise (NaNs equivalent), at every
+  numeric level (`malleus::policy`): f32/f64 constants, indices, loads, ordered locals,
+  neg/abs/sqrt/floor/ceil and add/sub/mul/div as native instructions; explicit `Fma` as one
+  Cranelift `fma` (single rounding); exp/ln/sin/cos/tan/pow/atan2/min/max and min/max
+  reductions as calls to `malleus_unary`/`malleus_binary`, registered JIT symbols that run
+  `malleus::policy::{unary, binary}` with the kernel's math library (host `std` at L1/L2,
+  pinned `libm` at L0). f32 values are widened exactly for the call and narrowed exactly
+  after it, so f32 rounding happens inside the reference routine. No implicit contraction or
+  reassociation.
+- Lazy selects and short-circuit predicates, all comparisons, sequential nested loops,
+  affine addressing, validated dense layouts, regions, Write/ReadWrite stores and all four
+  reductions. Canonical reduction order overrides loop permutation.
+- One generated function per kernel with the ABI
+  `extern "C" fn(table: *const *mut f64, strides: *const usize, points: usize)`: a native
+  loop over points, each rebasing operand `i` by `p * strides[i]` elements. This is exactly
+  the `malleus::prepared` batch contract (`points` sequential calls), so shared and
+  overlapping strides are executed, not refused.
+- Entry points: `JitKernel::{compile, prepare, prepare_owned, run}` and
+  `PreparedCall::{update_input, values, run}` (unchanged names; checked `BufferBinding`s);
+  positional `JitKernel::{call, run_batch}` over `malleus::prepared::{ReadBinding,
+  WriteBinding}` with a reusable `JitState`, refusing exactly what the core
+  `PreparedKernel::check_bindings` refuses (same `CallError`), allocation-free once warm
+  (`tests/alloc.rs`). `PreparedCall::run` re-derives its raw pointers on every call (the
+  cached-pointer-then-reborrow pattern is UB under Stacked/Tree Borrows; unit-tested so that
+  it runs under miri).
+- `JitCache`: thread-safe in-memory cache of `Arc<JitKernel>` keyed by `CacheKey { kernel
+  digest, schedule, level, BACKEND_VERSION, cpu_features(), BATCH_ABI }`; no disk cache.
+  `CampaignRunner` (identity `BACKEND_VERSION`) uses it for the local differential campaign.
 
-Explicit typed refusals cover transcendental functions, pow/min/max/atan2,
-min/max reductions, tiled/vectorized/parallel schedules, non-64-bit hosts, and
-kernels exceeding prototype budgets. IteratorKind::Parallel denotes independent
-iterations and is admitted but currently executed sequentially. Composition and
-facet wrappers are not lowered as units. There is no disk cache, object-file/AOT
-backend, SIMD lowering, automatic interpreter fallback, or production cache policy.
+Explicit typed refusals remain for tiled/vectorized/parallel schedules, non-64-bit hosts and
+kernels exceeding the IR/address budgets. Compositions and facet wrappers are not lowered as
+units. There is no SIMD lowering across points (the batch loop is scalar per point) and no
+automatic interpreter fallback.
 
-## Measured result
+## Historical measurement (pre-promotion experiment)
 
 `results.json` records the full run on 2026-10-18, x86_64 AMD EPYC 9V74 under KVM.
 Numbers are medians of seven batches; compilation batches contain three kernels

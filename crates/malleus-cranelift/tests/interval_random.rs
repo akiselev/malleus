@@ -6,7 +6,7 @@
 mod support;
 
 use malleus::*;
-use malleus_cranelift_experiment::{Error, JitKernel};
+use malleus_cranelift::{Error, JitKernel};
 use support::*;
 
 #[test]

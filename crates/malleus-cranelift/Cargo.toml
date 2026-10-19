@@ -1,10 +1,11 @@
 [package]
-name = "malleus-cranelift-experiment"
+name = "malleus-cranelift"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.93"
+license = "MIT OR Apache-2.0"
+description = "Optional Cranelift JIT backend for Malleus executables (native code; not a dependency of malleus)"
 publish = false
-
-[workspace]
 
 [dependencies]
 malleus = { path = "../.." }
@@ -15,13 +16,6 @@ cranelift-jit = "=0.128.3"
 cranelift-native = "=0.128.3"
 serde_json = "1"
 thiserror = "2"
-
-[profile.dev]
-opt-level = 1
-debug = 0
-
-[profile.dev.package.malleus]
-opt-level = 3
 
 [lints.clippy]
 undocumented_unsafe_blocks = "deny"

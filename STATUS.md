@@ -58,11 +58,18 @@ source/unrolled and core interval lowering; W8/W7/SV0-B2 contracts retained
   interval differential). `PreparedCall::run` re-derives its raw pointers each call.
   Lowered interval kernels' input contract (ordered non-NaN endpoints, caller checks
   `ieee_environment_supported()`) is in the `interval` module docs. Core test support
-  lives in `tests/support/` (no dependency on `experiments/`). Clippy/formatting pass.
-- Isolated `experiments/cranelift-compiler` still lowers existing `Executable` and
-  generated JVP/VJP IR; checked/borrowed calls, input updates and explicit refusals.
-  Direct Cranelift codegen/frontend/module/jit/native pins remain `=0.128.3`, full
-  transitive versions in its lockfile; native dependencies stay outside the core.
+  lives in `tests/support/` (no dependency on `crates/`). Clippy/formatting pass.
+- `crates/malleus-cranelift` (package `malleus-cranelift`, W11 M2; workspace member, not a
+  core dependency; replaces `experiments/cranelift-compiler`, no facade): bitwise-equal JIT for
+  every IR form at every level (callouts `malleus_unary`/`malleus_binary` -> `policy::{unary,
+  binary}`; explicit `Fma` -> Cranelift `fma`; min/max reductions), one generated function per
+  kernel with a native strided point loop (the M1 batch contract), positional
+  `call`/`run_batch` + `JitState` (allocation-free, `CallError` refusals decided by core
+  `PreparedKernel::check_bindings`), thread-safe `JitCache` keyed by digest + schedule + level +
+  `BACKEND_VERSION` + `cpu_features()` + `BATCH_ABI`. cadabra3 names unchanged
+  (`JitKernel::{compile, prepare, prepare_owned, run}`, `PreparedCall::{update_input, values,
+  run}`, `fixtures::{buffers, polynomial_batch}`). Cranelift pins `=0.128.3`; root
+  `Cargo.lock` now holds the workspace (core versions unchanged, additions only).
 - CADabra consumes both backends for exact-checked geometric guards, discovered
   degree-mask specialization and full Boolean profiling. Geometry/event/topology
   authority remains in CADabra; exact coefficient algebra remains Resolvent-owned.
@@ -189,7 +196,7 @@ kernel), per point. All four paths are compared bitwise before timing.
 | Dense matvec 64x64 | 1.65 ms | 404.26 us | 1.06 ms | 216.30 us |
 | Property kernel, 10^5 point calls | 1.50 us | 1.86 us | 614.0 ns | 74.3 ns |
 
-The Cranelift table in `experiments/cranelift-compiler/README.md` was measured on a
+The historical Cranelift table in `crates/malleus-cranelift/README.md` was measured on a
 different, idle host (EPYC 9V74); do not compare across the two tables. Rerun on an idle
 host before quoting speedups.
 

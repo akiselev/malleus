@@ -1,6 +1,6 @@
 //! Dissimilar direct fixtures plus Malleus's existing derivative campaign.
 use malleus::*;
-use malleus_cranelift_experiment::{CampaignRunner, JitKernel, fixtures};
+use malleus_cranelift::{CampaignRunner, JitKernel, fixtures};
 
 fn execute(e: &Executable, b: &mut [Vec<f64>], jit: Option<&JitKernel>) {
     let mut bindings: Vec<_> = b
@@ -281,14 +281,15 @@ fn binding_errors_are_checked_before_jit_entry() {
 }
 
 #[test]
-fn unsupported_ir_and_schedules_refuse_explicitly() {
+fn unsupported_schedules_refuse_explicitly() {
     let mut k = fixtures::polynomial(1);
     k.body.statements = vec![Statement::Store {
         operand: OperandId::new(4),
         value: ScalarExpr::unary(UnaryOp::Exp, ScalarExpr::Load(OperandId::new(0))),
     }];
+    // Transcendentals are admitted (called out to the reference implementation).
     let e = Executable::reference(validate(k).unwrap());
-    assert!(JitKernel::compile(&e).is_err());
+    assert!(JitKernel::compile(&e).is_ok());
     let v = validate(fixtures::polynomial(3)).unwrap();
     let mut s = KernelSchedule::canonical(&v);
     s.vectorization = Some(VectorizationPlan {

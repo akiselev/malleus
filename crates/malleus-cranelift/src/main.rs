@@ -1,7 +1,7 @@
 //! Compile-cost and warm interpreter/native comparison on identical Malleus executables.
 
 use malleus::*;
-use malleus_cranelift_experiment::{JitKernel, fixtures};
+use malleus_cranelift::{JitKernel, fixtures};
 use serde_json::json;
 use std::{hint::black_box, time::Instant};
 
