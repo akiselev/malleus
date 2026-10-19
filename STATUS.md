@@ -162,30 +162,26 @@ external operand, and composition binds buffers between verbatim kernels.
 
 ## Validation
 
-Core checks rerun successfully on 2026-10-18 (W11 M1 clone):
+Checks rerun successfully on 2026-10-19 (W11 M2 clone, `CARGO_PROFILE_TEST_OPT_LEVEL=2`):
 
-- `cargo test -p malleus --locked` (opt-level 2): 53 tests passed (1 unit; composition 9;
-  digest_pins 1; facet_pair 6; interval_differential 1; interval_soundness 3;
-  output_dependency 6; prepared 5; prepared_alloc 1; rust_source 2; structured_kernel 11;
-  sv0_campaign 7).
+- `cargo test -p malleus --locked`: 61 tests passed (1 unit; composition 9; digest_pins 1;
+  facet_pair 6; interval_differential 1; interval_soundness 3; output_dependency 6; policy 6;
+  prepared 5; prepared_alloc 1; rust_source 4; structured_kernel 11; sv0_campaign 7).
+- `cargo test -p malleus-cranelift --locked`: 27 passed (3 unit; alloc 1; differential 13;
+  interval 4; interval_random 1; native 5).
+- clippy `-D warnings`, rustdoc `-D warnings`, `cargo fmt -p <crate> -- --check` for both crates.
+- Miri (`scripts/miri.sh`, nightly miri 2026-07-08, `MIRIFLAGS=-Zmiri-deterministic-floats`;
+  run once, Stacked Borrows): core `--lib` 1/1, `structured_kernel` 11/11, `prepared`
+  binding/module/composition tests 3/3, `policy` fma/serialization/validation 3/3;
+  `malleus-cranelift --lib` 3/3 (PreparedCall pointer re-derivation regression ported from the
+  cadabra3 toy, BoundBuffers refusals, JitState tables). No UB reported. Without the flag miri
+  perturbs `fma` results by design (one bit test fails), so the flag is part of the command.
+  Excluded for runtime (>280 s each under miri): `prepared_alloc`, `interval_soundness`. JIT
+  integration tests are `#![cfg(not(miri))]`.
 - `cargo clippy -p malleus --all-targets -- -D warnings`
 - `RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps`
 - `cargo fmt --package malleus -- --check`; `git diff --check`
-- Focused `output_dependency` 6/6: unused/dead/overwritten data, local/operand transitivity,
-  all outputs, no cancellation, predicate and branch conservatism, affine/reduction behavior,
-  invalid locals and invalid/nonreadable queried operands. Queried read-write operands
-  conservatively return true: partial stores and empty iteration domains can retain initial data.
-  This corrects the initial whole-buffer overwrite assumption; both cases have regressions.
-
-Proof tests for the W7 packages: `two_kernel_composition_evaluates_equal_to_the_hand_inlined_kernel`,
-`jvp_through_the_composition_matches_the_inlined_jvp`,
-`cross_block_jvp_is_the_chain_rule_of_producer_and_consumer_tangents`,
-`vjp_through_the_composition_satisfies_the_adjoint_identity` (1e-12),
-`fan_out_to_two_consumers_accumulates_the_producer_cotangent`,
-`component_kernel_digests_are_unchanged_by_composition_and_differentiation`,
-`swap_covariance_is_proven_by_execution_and_a_wrong_parity_is_detected`,
-`jvp_and_vjp_of_the_facet_pair_satisfy_the_adjoint_identity_and_keep_roles`,
-`kernel_and_module_digests_are_deterministic_and_pinned`.
+Proof tests for W7/W8 packages: `tests/{composition,facet_pair,output_dependency}.rs`.
 
 ## Prepared execution measurements (W11 M1)
 
@@ -226,8 +222,7 @@ interpreter calls) before timing. Batched Rust: `lower_rust_batched` width 8 via
 | quadratic-Vjp-1024 | 919162.8 | 225710.5 | 57699.3 | 12639.1 | 13417.0 | 13288.2 | 12258.7 | 17583.0 | 1539 us |
 | matvec-64x64 | 1594166.4 | 316180.1 | 82548.6 | 28286.0 | 29649.8 | 29733.6 | 34679.4 | 5212.1 | 1514 us |
 
-Positional JIT `call` costs ~85 ns over the borrowed `PreparedCall::run` on the 1-point kernel
-(core `check_bindings` extent checks + pointer table); batching amortizes it (16.7 ns/pt).
+Positional JIT `call` costs ~85 ns over borrowed `PreparedCall::run` (1-point kernel: binding checks + pointer table); batching amortizes it.
 
 ## Contract shapes landed (for GX-CONTRACTS C12)
 

@@ -1,4 +1,6 @@
 //! Policy levels, explicit Fma, callouts, the native batch loop and the compile cache.
+// Executes JIT-generated machine code, which miri cannot interpret.
+#![cfg(not(miri))]
 use malleus::policy::{NumericLevel, contract_fma};
 use malleus::prepared::*;
 use malleus::*;

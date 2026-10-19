@@ -1,4 +1,6 @@
 //! Warm native calls allocate nothing: prepared `run`, positional `call` and `run_batch`.
+// Executes JIT-generated machine code, which miri cannot interpret.
+#![cfg(not(miri))]
 use malleus::prepared::*;
 use malleus::*;
 use malleus_cranelift::{JitKernel, fixtures};

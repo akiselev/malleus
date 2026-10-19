@@ -1,4 +1,6 @@
 //! Dissimilar direct fixtures plus Malleus's existing derivative campaign.
+// Executes JIT-generated machine code, which miri cannot interpret.
+#![cfg(not(miri))]
 use malleus::*;
 use malleus_cranelift::{CampaignRunner, JitKernel, fixtures};
 

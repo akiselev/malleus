@@ -1,6 +1,8 @@
 //! Random interval programs: the Cranelift JIT must match the reference interpreter bit for
 //! bit, including infinite and extreme endpoints. The generator is shared with the core
 //! soundness and source-differential tests.
+// Executes JIT-generated machine code, which miri cannot interpret.
+#![cfg(not(miri))]
 
 #[path = "../../../tests/support/mod.rs"]
 mod support;
