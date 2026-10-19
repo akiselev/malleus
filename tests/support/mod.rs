@@ -321,3 +321,54 @@ pub fn libm_extern_args() -> Vec<std::ffi::OsString> {
     dependency.push(deps);
     vec!["--extern".into(), extern_arg, "-L".into(), dependency]
 }
+
+/// Exact sample points for element `i`: all 16 corners, the midpoint and `interior` random
+/// convex combinations `(a*(1024-k) + b*k) / 1024` per operand.
+pub fn sample_points(r: &mut Rng, iv: &[(f64, f64); 4], interior: usize) -> Vec<Vec<Dyadic>> {
+    let at = |k: usize, w: i64| {
+        let (a, b) = iv[k];
+        Dyadic::from_f64(a)
+            .mul(&Dyadic::from_i64(1024 - w))
+            .add(&Dyadic::from_f64(b).mul(&Dyadic::from_i64(w)))
+            .scale_down(10)
+    };
+    let mut points = vec![];
+    for corner in 0..16 {
+        points.push(
+            (0..4)
+                .map(|k| at(k, if corner >> k & 1 == 0 { 0 } else { 1024 }))
+                .collect(),
+        );
+    }
+    points.push((0..4).map(|k| at(k, 512)).collect());
+    for _ in 0..interior {
+        points.push((0..4).map(|k| at(k, r.below(1025) as i64)).collect());
+    }
+    points
+}
+
+/// Describe the first sample at which `[lo, hi]` fails to contain the exact value.
+pub fn first_violation(
+    prog: &Prog,
+    inputs: &Inputs,
+    lo: &[f64],
+    hi: &[f64],
+    r: &mut Rng,
+) -> Option<String> {
+    for (i, iv) in inputs.iter().enumerate() {
+        for p in sample_points(r, iv, 6) {
+            let v = prog.exact(&p, i);
+            if !v.within(lo[i], hi[i]) {
+                return Some(format!(
+                    "element {i}: [{:e} ({:#x}), {:e} ({:#x})] excludes exact value; \
+                     inputs {iv:?}; program {prog:?}",
+                    lo[i],
+                    lo[i].to_bits(),
+                    hi[i],
+                    hi[i].to_bits()
+                ));
+            }
+        }
+    }
+    None
+}

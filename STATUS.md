@@ -2,7 +2,8 @@
 
 Updated: 2026-10-18
 Branch: `master`
-Milestone: W11 M2 numeric policy levels, explicit `Fma`, portable transcendentals; W11 M1
+Milestone: W11 M4 interval upgrades (successor-bound padding, centered and affine
+enclosures) and FPCore/symbolic export; W11 M2 numeric policy levels, explicit `Fma`, portable transcendentals; W11 M1
 prepared kernels and batched execution (`EXECUTION.md`); strict Rust
 source/unrolled and core interval lowering; W8/W7/SV0-B2 contracts retained
 
@@ -56,10 +57,13 @@ source/unrolled and core interval lowering; W8/W7/SV0-B2 contracts retained
   and all reference reductions. `lower_rust_unrolled` preserves traversal while
   expanding at most 64 iterations under a source-size budget. Core dependencies
   are unchanged. See `RUST-BACKEND.md`.
-- Explicit outward `interval::lower_intervals` moved from the compiler experiment
-  into the core. Strict f64 Read/Write neg/add/sub/mul, correlated squares and
-  index-only branches; FP-environment probe, conservative nonfinite widening and
-  typed capability/budget refusals. No alternate numeric IR or compatibility facade.
+- Core `interval::lower_intervals`: strict f64 Read/Write neg/add/sub/mul, correlated
+  squares, explicit `Fma` (real `a·b+c`, W11 M4) and index-only branches; FP-environment
+  probe, nonfinite widening, typed refusals. W11 M4: padding is the Rump–Zimmermann–Boldo–
+  Melquiond successor bound `RN(RN(φ|v|)+η)`, φ = 2^-53(1+2^-52), η = 2^-1074 (proof in
+  `crates/malleus-cranelift/INTERVALS.md`; each enclosure is inside the previous
+  `|v|·2^-52 + MIN_POSITIVE` one). New `interval::{lower_centered_intervals,
+  lower_affine_intervals}` (same endpoint layout, intersected with naive). Taylor models open.
 - Validation: core 45 tests, including rustc-compiled looped/unrolled differential
   kernels, seeded randomized interval enclosure soundness against exact rationals
   (with an inward-shrink negative control) and a random interpreter-vs-Rust-source
@@ -162,13 +166,15 @@ external operand, and composition binds buffers between verbatim kernels.
 
 ## Validation
 
-Checks rerun successfully on 2026-10-19 (W11 M2 clone, `CARGO_PROFILE_TEST_OPT_LEVEL=2`):
+Checks rerun successfully on 2026-10-19 (W11 M4 clone, `CARGO_PROFILE_TEST_OPT_LEVEL=2`):
 
-- `cargo test -p malleus --locked`: 61 tests passed (1 unit; composition 9; digest_pins 1;
-  facet_pair 6; interval_differential 1; interval_soundness 3; output_dependency 6; policy 6;
-  prepared 5; prepared_alloc 1; rust_source 4; structured_kernel 11; sv0_campaign 7).
-- `cargo test -p malleus-cranelift --locked`: 27 passed (3 unit; alloc 1; differential 13;
-  interval 4; interval_random 1; native 5).
+- `cargo test -p malleus --locked`: 68 tests passed (1 unit; composition 9; digest_pins 1;
+  facet_pair 6; interval_differential 1; interval_enclosures 5; interval_padding 2;
+  interval_soundness 3; output_dependency 6; policy 6; prepared 5; prepared_alloc 1;
+  rust_source 4; structured_kernel 11; sv0_campaign 7).
+- `cargo test -p malleus-cranelift --locked`: 28 passed (3 unit; alloc 1; differential 13;
+  interval 4; interval_random 2 (adds centered/affine JIT-vs-interpreter: 71 of 120 lowered
+  programs compiled, the rest exceed the JIT budget); native 5).
 - clippy `-D warnings`, rustdoc `-D warnings`, `cargo fmt -p <crate> -- --check` for both crates.
 - Miri (`scripts/miri.sh`, nightly miri 2026-07-08, `MIRIFLAGS=-Zmiri-deterministic-floats`;
   run once, Stacked Borrows): core `--lib` 1/1, `structured_kernel` 11/11, `prepared`
@@ -262,15 +268,10 @@ Positional JIT `call` costs ~85 ns over borrowed `PreparedCall::run` (1-point ke
 
 ## Consumer surface changes required (recorded for the Scientia/Finitum lanes)
 
-- Scientia: lower `output` declarations to point-kernel bundles over the model's QFunction
-  inputs (today only form integrals and property definitions lower); a `SysBlock::Composed`
-  needs the producer output bundle and the consumer slot operand to build a `KernelComposition`,
-  whose `composition_digest` belongs in the system artifact chain.
-- Finitum: `bind_kernels`/`execute` gain a composed variant that binds `StageOperand`s from
-  the two instances' point evaluations (values by `derivative_stages[..].primal_operands`,
-  directions/seeds by the request tables) and records `composition_digest` in its receipt;
-  facet-pair kernels need the interior/interface facet traversal to gather minus/plus traces and
-  the minus-to-plus normal (SV2-B2 pull-forward).
+- Scientia: lower `output` declarations to point-kernel bundles; `SysBlock::Composed` builds a
+  `KernelComposition` whose `composition_digest` joins the system artifact chain.
+- Finitum: composed `bind_kernels`/`execute` binding `StageOperand`s and recording
+  `composition_digest`; facet-pair traversal for minus/plus traces (SV2-B2).
 
 ## Current limits and next work
 
@@ -288,13 +289,12 @@ Positional JIT `call` costs ~85 ns over borrowed `PreparedCall::run` (1-point ke
 - No facet-pair composition wrapper: composing a producer output into a facet-pair kernel's
   side operand works at the plain-kernel level and loses no roles, but no helper builds it.
 - Fusing a composition into one kernel (its own artifact identity) is not implemented.
-- The reference interpreter copies stage buffers in and out of a composition; a backend may
-  alias them.
-- Vector/tensor gap observed while building the facet fixture (W7 package 3, not implemented):
-  one kernel cannot hold outputs with different free-axis sets (a scalar jump beside a
-  reduced normal flux) without an index-equality `Select` guard, because a scalar `Write` under
-  a reduction domain is an aliasing write. Scientia sidesteps it with one module per output;
-  Stokes/elasticity composition revealed no further gap, so nothing else was added.
+- Vector/tensor gap (W7 package 3, not implemented): one kernel cannot hold outputs with
+  different free-axis sets without an index-equality `Select` guard; Scientia uses one module
+  per output.
+- Interval upgrades (W11 M4): Taylor models are open; centered/affine admit only the naive
+  op set; the centered form differentiates once per read operand (expanded JVPs can hit the
+  typed lowering budget, <2% of random 4-input programs).
 - Materialized Jacobians and differentiation through read-write operands remain refusals.
 - Bounds and simple injective-write maps are proved conservatively; general affine
   injectivity remains future work before production parallel schedules.

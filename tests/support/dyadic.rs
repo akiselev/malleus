@@ -188,6 +188,27 @@ impl Dyadic {
         self.add(&o.neg())
     }
 
+    /// Exact total order of two dyadics.
+    pub fn cmp(&self, o: &Self) -> Ordering {
+        let d = self.sub(o);
+        if d.is_zero() {
+            Ordering::Equal
+        } else if d.negative {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        }
+    }
+
+    /// `mantissa * 2^exponent` exactly.
+    pub fn from_parts(mantissa: i64, exponent: i64) -> Self {
+        Dyadic {
+            negative: mantissa < 0,
+            mag: trim(vec![mantissa.unsigned_abs()]),
+            exp: exponent,
+        }
+    }
+
     /// Exact comparison against an f64 bound; `-inf`/`+inf` bound everything finite and NaN
     /// is incomparable (`None`).
     pub fn cmp_f64(&self, bound: f64) -> Option<Ordering> {
