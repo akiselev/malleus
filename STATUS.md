@@ -27,7 +27,16 @@ source/unrolled and core interval lowering; W8/W7/SV0-B2 contracts retained
 - Vague `FmaPolicy::Allowed`/`Reassociation::Allowed`: no backend acts on them (strict
   execution); accepted at L1 for identity, refused at L0/L2 by
   `ValidationError::ImpreciseNumericPolicy` (new variant) and by `contract_fma`.
-- New root-level names: only the module `policy`.
+- New root-level names: modules `policy` and `rust` (the latter was private; it now also
+  exposes `rust::{lower_rust_batched, BatchedRustOptions}`).
+- `lower_rust_batched(e, name, BatchedRustOptions { width (1..=64, default 8), avx2_dispatch })`:
+  standalone `pub fn name(points, b0, s0, b1, s1, ..)` with the run_batch contract
+  (overflow-checked extents before effects; `points = 0` no-op); disjoint writable windows run
+  full lane blocks over `[T; W]` arrays, the rest point by point; optional AVX2
+  `#[target_feature]` copy behind `is_x86_feature_detected!` (one documented `unsafe` call).
+  Proven by `tests/rust_source.rs::compiled_batched_rust_matches_sequential_interpreter_calls`
+  (rustc; L0/L1, f32/f64, Fma, lane-array locals, reductions, JVP/VJP, matvec; disjoint,
+  shared and overlapping strides; refusal).
 
 ## Local backends
 
@@ -199,6 +208,26 @@ kernel), per point. All four paths are compared bitwise before timing.
 The historical Cranelift table in `crates/malleus-cranelift/README.md` was measured on a
 different, idle host (EPYC 9V74); do not compare across the two tables. Rerun on an idle
 host before quoting speedups.
+
+## W11 M2 backend measurements
+
+`cargo run -p malleus-cranelift --release --locked --quiet > crates/malleus-cranelift/results-m2.json`,
+2026-10-19, Intel i7-8850H, **contended host (load average 22-41)**: ratios indicative only.
+ns per call, median of 7 batches; "/pt" = one call over 64 independent strided points, per
+point. Every path is checked bitwise against the interpreter (batches against 64 sequential
+interpreter calls) before timing. Batched Rust: `lower_rust_batched` width 8 via `rustc -O`.
+
+| Kernel | Interpreter | M1 prepared | M1 batch/pt | JIT checked | JIT prepared | JIT positional | JIT batch/pt | Batched Rust/pt | JIT compile |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| guard-polynomial-1 | 919.5 | 265.4 | 31.4 | 270.2 | 42.0 | 126.8 | 16.7 | 2.3 | 1629 us |
+| guard-polynomial-64 | 38228.3 | 10124.8 | 1496.0 | 837.4 | 621.9 | 653.4 | 629.0 | 66.0 | 1337 us |
+| guard-polynomial-4096 | 2394836.0 | 576093.6 | 119849.6 | 38611.1 | 39118.2 | 35654.9 | 42631.5 | 13651.3 | 1285 us |
+| quadratic-Jvp-1024 | 908558.5 | 246533.6 | 57154.2 | 10817.5 | 11248.5 | 11412.0 | 11550.4 | 2731.6 | 1525 us |
+| quadratic-Vjp-1024 | 919162.8 | 225710.5 | 57699.3 | 12639.1 | 13417.0 | 13288.2 | 12258.7 | 17583.0 | 1539 us |
+| matvec-64x64 | 1594166.4 | 316180.1 | 82548.6 | 28286.0 | 29649.8 | 29733.6 | 34679.4 | 5212.1 | 1514 us |
+
+Positional JIT `call` costs ~85 ns over the borrowed `PreparedCall::run` on the 1-point kernel
+(core `check_bindings` extent checks + pointer table); batching amortizes it (16.7 ns/pt).
 
 ## Contract shapes landed (for GX-CONTRACTS C12)
 

@@ -357,3 +357,197 @@ fn compiled_portable_math_and_explicit_fma_match_interpreter() {
     let last: Vec<Vec<u64>> = serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
     assert_eq!(f64::from_bits(last[3][0]), -(e * e));
 }
+
+fn sequential(
+    e: &Executable,
+    mut buffers: Vec<Vec<f64>>,
+    strides: &[usize],
+    points: usize,
+) -> Vec<Vec<f64>> {
+    for p in 0..points {
+        let mut bindings: Vec<_> = buffers
+            .iter_mut()
+            .enumerate()
+            .map(|(i, v)| BufferBinding::new(OperandId::new(i), &mut v[p * strides[i]..]))
+            .collect();
+        Interpreter::run(e, &mut bindings).unwrap();
+    }
+    buffers
+}
+
+#[test]
+fn compiled_batched_rust_matches_sequential_interpreter_calls() {
+    use malleus::policy::{NumericLevel, contract_fma};
+    use malleus::rust::{BatchedRustOptions, lower_rust_batched};
+    let mut kernels = vec![];
+    for ty in [ScalarType::F32, ScalarType::F64] {
+        for level in [NumericLevel::StrictHost, NumericLevel::StrictPortable] {
+            let mut k = fixtures::polynomial_batch(3);
+            k.numeric_policy.scalar_type = ty;
+            k.numeric_policy.level = level;
+            kernels.push(k.clone());
+            let mut q = fixtures::quadratic(4);
+            q.numeric_policy.scalar_type = ty;
+            q.numeric_policy.level = level;
+            let Statement::Store { value, .. } = &mut q.body.statements[0] else {
+                panic!("store")
+            };
+            *value = ScalarExpr::binary(
+                BinaryOp::Atan2,
+                ScalarExpr::unary(UnaryOp::Exp, value.clone()),
+                ScalarExpr::Select {
+                    condition: Box::new(Predicate::Compare {
+                        op: CompareOp::Less,
+                        lhs: Box::new(ScalarExpr::Load(OperandId::new(0))),
+                        rhs: Box::new(ScalarExpr::Constant(0.5)),
+                    }),
+                    if_true: Box::new(ScalarExpr::Constant(-0.0)),
+                    if_false: Box::new(ScalarExpr::Load(OperandId::new(1))),
+                },
+            );
+            for op in [ReductionOp::Add, ReductionOp::Max] {
+                let mut r = q.clone();
+                r.operands[2].access = AccessMode::Reduce(op);
+                kernels.push(r);
+            }
+            for mode in [DerivativeMode::Jvp, DerivativeMode::Vjp] {
+                let p = differentiate(
+                    &k,
+                    &DerivativeRequest {
+                        mode,
+                        independent_operands: vec![OperandId::new(3)],
+                        dependent_operands: vec![OperandId::new(4)],
+                    },
+                )
+                .unwrap();
+                kernels.push(p.kernel);
+            }
+        }
+        // A `Let` local becomes a `[T; W]` lane array.
+        let mut l = fixtures::polynomial_batch(3);
+        l.numeric_policy.scalar_type = ty;
+        l.numeric_policy.level = NumericLevel::StrictPortable;
+        let local = ScalarExpr::Local(LocalId::new(0));
+        l.body.statements = vec![
+            Statement::Let {
+                local: LocalId::new(0),
+                value: ScalarExpr::binary(
+                    BinaryOp::Mul,
+                    ScalarExpr::Load(OperandId::new(0)),
+                    ScalarExpr::Load(OperandId::new(3)),
+                ),
+            },
+            Statement::Store {
+                operand: OperandId::new(4),
+                value: ScalarExpr::fma(
+                    ScalarExpr::unary(UnaryOp::Sin, local.clone()),
+                    local,
+                    ScalarExpr::Load(OperandId::new(1)),
+                ),
+            },
+        ];
+        kernels.push(l);
+        let mut m = fixtures::matvec(3);
+        m.numeric_policy.scalar_type = ty;
+        kernels.push(m.clone());
+        kernels.push(contract_fma(&m).unwrap().kernel);
+    }
+    let mut code = String::new();
+    let mut main = String::from("fn main() {\n");
+    let mut expected = vec![];
+    let mut case = 0;
+    for (n, k) in kernels.iter().enumerate() {
+        let e = Executable::reference(validate(k.clone()).unwrap());
+        let options = BatchedRustOptions {
+            width: if n % 2 == 0 { 4 } else { 8 },
+            avx2_dispatch: n % 3 == 0,
+        };
+        let name = format!("batched_{n}");
+        code.push_str(&lower_rust_batched(&e, &name, options).unwrap());
+        let lengths: Vec<usize> = k
+            .operands
+            .iter()
+            .map(|o| o.region.offset + o.region.length)
+            .collect();
+        // Disjoint (lane blocks), shared (stride 0) and overlapping (stride 1) writable windows.
+        for pattern in 0..3 {
+            let strides: Vec<usize> = k
+                .operands
+                .iter()
+                .zip(&lengths)
+                .enumerate()
+                .map(|(i, (o, &len))| match (o.access.can_write(), pattern) {
+                    (true, 0) => len,
+                    (true, 1) => 0,
+                    (true, _) => 1,
+                    (false, _) if i % 2 == 0 => len,
+                    (false, _) => 0,
+                })
+                .collect();
+            for points in [0, 1, 19] {
+                let buffers: Vec<Vec<f64>> = lengths
+                    .iter()
+                    .zip(&strides)
+                    .enumerate()
+                    .map(|(i, (&len, &s))| {
+                        (0..len + s * points)
+                            .map(|j| {
+                                [0.25, -1.5, 0.0, -0.0, 3.0, 1e-310, 0.75][(i * 5 + j * 3) % 7]
+                            })
+                            .collect()
+                    })
+                    .collect();
+                expected.push(sequential(&e, buffers.clone(), &strides, points));
+                main.push_str("{\n");
+                for (i, b) in buffers.iter().enumerate() {
+                    let values: Vec<_> = b
+                        .iter()
+                        .map(|x| format!("f64::from_bits({}u64)", x.to_bits()))
+                        .collect();
+                    writeln!(main, "let mut b{i}=vec![{}];", values.join(",")).unwrap();
+                }
+                write!(main, "{name}({points},").unwrap();
+                for (i, o) in k.operands.iter().enumerate() {
+                    let m = if o.access == AccessMode::Read {
+                        ""
+                    } else {
+                        "mut "
+                    };
+                    write!(main, "&{m}b{i},{},", strides[i]).unwrap();
+                }
+                main.push_str(").unwrap();\n");
+                let printed: Vec<_> = (0..buffers.len())
+                    .map(|i| format!("b{i}.iter().map(|x|x.to_bits()).collect::<Vec<_>>()"))
+                    .collect();
+                writeln!(
+                    main,
+                    "println!(\"{{:?}}\",vec![{}]);\n}}",
+                    printed.join(",")
+                )
+                .unwrap();
+                case += 1;
+            }
+        }
+    }
+    // Refusals before any effect: a short read window and an overflowing stride.
+    main.push_str("{let a=vec![0.0;2];let mut w=vec![7.0;3];");
+    main.push_str(
+        "assert_eq!(batched_0(2,&a,1,&a,0,&a,0,&a,0,&mut w,0), Err(\"short operand 0\"));}\n",
+    );
+    main.push_str("}\n");
+    let source = code + &main;
+    assert!(
+        source.contains("::core::array::from_fn") && source.contains("is_x86_feature_detected")
+    );
+    let stdout = rustc_run_with("rust-batched", &source, &libm_extern_args());
+    assert_eq!(stdout.lines().count(), case);
+    for (line, reference) in stdout.lines().zip(expected) {
+        let output: Vec<Vec<u64>> = serde_json::from_str(line).unwrap();
+        for (actual, want) in output.iter().flatten().zip(reference.iter().flatten()) {
+            assert!(
+                *actual == want.to_bits() || (f64::from_bits(*actual).is_nan() && want.is_nan()),
+                "{actual:x} != {want:?}"
+            );
+        }
+    }
+}

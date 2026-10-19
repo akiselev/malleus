@@ -25,7 +25,7 @@ pub mod interval;
 mod ir;
 pub mod policy;
 pub mod prepared;
-mod rust;
+pub mod rust;
 mod validate;
 
 pub use campaign::{

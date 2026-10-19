@@ -1,0 +1,85 @@
+{
+  "build": "cargo --release (opt-level 3); batched Rust via rustc -O, width 8, no AVX2 dispatch",
+  "cranelift": "0.128.3",
+  "results": [
+    {
+      "batched_rust_per_point_ns": 2.280749198717949,
+      "bitwise_match": true,
+      "interpreter_ns": 919.50695,
+      "jit_batch_per_point_ns": 16.657351762820515,
+      "jit_checked_ns": 270.2392,
+      "jit_compile_ns": 1628543.0,
+      "jit_positional_ns": 126.82355,
+      "jit_prepared_ns": 41.9604,
+      "kernel": "guard-polynomial-1",
+      "m1_batch_per_point_ns": 31.44941907051282,
+      "m1_prepared_ns": 265.401
+    },
+    {
+      "batched_rust_per_point_ns": 66.04211956521739,
+      "bitwise_match": true,
+      "interpreter_ns": 38228.29882044561,
+      "jit_batch_per_point_ns": 628.9626358695652,
+      "jit_checked_ns": 837.4220183486239,
+      "jit_compile_ns": 1336801.0,
+      "jit_positional_ns": 653.4456094364351,
+      "jit_prepared_ns": 621.9449541284404,
+      "kernel": "guard-polynomial-64",
+      "m1_batch_per_point_ns": 1496.0366847826087,
+      "m1_prepared_ns": 10124.826998689385
+    },
+    {
+      "batched_rust_per_point_ns": 13651.278125,
+      "bitwise_match": true,
+      "interpreter_ns": 2394835.9583333335,
+      "jit_batch_per_point_ns": 42631.51875,
+      "jit_checked_ns": 38611.083333333336,
+      "jit_compile_ns": 1285012.0,
+      "jit_positional_ns": 35654.916666666664,
+      "jit_prepared_ns": 39118.25,
+      "kernel": "guard-polynomial-4096",
+      "m1_batch_per_point_ns": 119849.596875,
+      "m1_prepared_ns": 576093.625
+    },
+    {
+      "batched_rust_per_point_ns": 2731.63125,
+      "bitwise_match": true,
+      "interpreter_ns": 908558.4742268041,
+      "jit_batch_per_point_ns": 11550.353125,
+      "jit_checked_ns": 10817.536082474227,
+      "jit_compile_ns": 1525401.0,
+      "jit_positional_ns": 11411.9793814433,
+      "jit_prepared_ns": 11248.525773195875,
+      "kernel": "quadratic-Jvp-1024",
+      "m1_batch_per_point_ns": 57154.234375,
+      "m1_prepared_ns": 246533.59793814432
+    },
+    {
+      "batched_rust_per_point_ns": 17583.025,
+      "bitwise_match": true,
+      "interpreter_ns": 919162.7731958763,
+      "jit_batch_per_point_ns": 12258.696875,
+      "jit_checked_ns": 12639.144329896908,
+      "jit_compile_ns": 1538607.0,
+      "jit_positional_ns": 13288.175257731958,
+      "jit_prepared_ns": 13416.98969072165,
+      "kernel": "quadratic-Vjp-1024",
+      "m1_batch_per_point_ns": 57699.259375,
+      "m1_prepared_ns": 225710.51546391752
+    },
+    {
+      "batched_rust_per_point_ns": 5212.125,
+      "bitwise_match": true,
+      "interpreter_ns": 1594166.4042553192,
+      "jit_batch_per_point_ns": 34679.3875,
+      "jit_checked_ns": 28286.021276595744,
+      "jit_compile_ns": 1514096.0,
+      "jit_positional_ns": 29733.63829787234,
+      "jit_prepared_ns": 29649.76595744681,
+      "kernel": "matvec-64x64",
+      "m1_batch_per_point_ns": 82548.6125,
+      "m1_prepared_ns": 316180.10638297873
+    }
+  ],
+  "timing": "median of 7 batches, ns per call; batch columns: one call over 64 independent strided points, per point"
+}
