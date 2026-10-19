@@ -64,6 +64,14 @@ source/unrolled and core interval lowering; W8/W7/SV0-B2 contracts retained
   `crates/malleus-cranelift/INTERVALS.md`; each enclosure is inside the previous
   `|v|·2^-52 + MIN_POSITIVE` one). New `interval::{lower_centered_intervals,
   lower_affine_intervals}` (same endpoint layout, intersected with naive). Taylor models open.
+- W11 M4 export (`EXPORT.md`; new root names: modules `symbolic`, `fpcore` only):
+  `symbolic::{export_symbolic, SymbolicKernel { schema "malleus-symbolic/1", kernel,
+  kernel_digest, precision, level, inputs, nodes, outputs }, SymbolicNode, ExactConstant,
+  SymbolicInput, SymbolicOutput, SymbolicError, MAX_POINTS = 4096, MAX_NODES = 65536}` unrolls
+  the domain into a hash-consed DAG (exact constants, `fma { single_rounding }`, lazy `select`,
+  reductions as binary nodes); `fpcore::{export_fpcore, fpcore_from_symbolic, InputBox,
+  FpcoreBenchmark, FpcoreError}` emits FPCore 2.0 per output element with `:pre` from boxes.
+  `UnaryOp`/`BinaryOp`/`CompareOp`/`ScalarType` gained `Hash` (serde unchanged).
 - Validation: core 45 tests, including rustc-compiled looped/unrolled differential
   kernels, seeded randomized interval enclosure soundness against exact rationals
   (with an inward-shrink negative control) and a random interpreter-vs-Rust-source
@@ -99,16 +107,11 @@ external operand, and composition binds buffers between verbatim kernels.
 ## Implemented
 
 - `primal_output_reads_input(&StructuredKernel, OperandId) -> Result<bool, ValidationError>`:
-  validates the full kernel and readable input, follows ordered local and operand dependencies
-  to final writable outputs, ignores dead locals/overwritten stores, retains reduction history,
-  and conservatively includes select predicates and both branches. No algebraic cancellation.
-  Static affine addresses cannot read data. All writable buffers, including read-write buffers,
-  are outputs; carried dependence is conservative across repeated iteration addresses. A false
-  result proves no value dependency, not freedom from errors in eagerly executed dead expressions.
-  Scientia consumes this owner proof for property argument admission; no frontend IR walker needed.
+  conservative ordered dependency to final writable outputs (dead locals/overwritten stores
+  ignored, both select branches included, no algebraic cancellation); a false result proves no
+  value dependency. Scientia consumes it for property argument admission.
 
-- One `malleus` crate. Runtime dependencies: `serde`, `serde_json`, `blake3`
-  (the last two only for deterministic artifact digests; pinned in `Cargo.lock`).
+- Core runtime dependencies: `serde`, `serde_json`, `blake3`, `libm =0.2.16` (`Cargo.lock`).
 - `StructuredKernel` and `StructuredModule` with fixed iteration domains,
   affine indexing maps, explicit buffer regions and dense layouts, ordered SSA-like locals, scalar
   expressions, predicates, stores, and reductions.
@@ -134,15 +137,11 @@ external operand, and composition binds buffers between verbatim kernels.
   `Read` member, writers strictly before readers, equal shape/layout/region; readers may repeat
   in one stage, writers may not). `validate_composition` → `ValidatedComposition` →
   `ExecutableComposition::reference`; `Interpreter::run_composition` binds unshared operands by
-  `StageOperand` and, optionally, whole shared buffers by index (unbound shared buffers are
-  zero-initialized scratch). `composition_digest` (`malleus-kernel-composition/1`) covers the
-  stage digests and the sharing table only. `differentiate_composition` builds the JVP/VJP as a
-  composition of per-stage `differentiate` products: reproduced primal producer stages, then
-  derivative stages (forward order for JVP, reverse for VJP), with the producer tangent shared
-  into each consumer direction (JVP) or each consumer cotangent reduced into the producer seed
-  (VJP). Fan-out to several consumers accumulates. Structurally disconnected request operands
-  are typed refusals (`IndependentUnreachable`/`DependentUnreachable`), as are shared operands
-  in a request.
+  `StageOperand` and optionally whole shared buffers (unbound ones are zero scratch).
+  `composition_digest` (`malleus-kernel-composition/1`) covers stage digests and sharing.
+  `differentiate_composition` composes per-stage `differentiate` products (primal producers,
+  then derivative stages; tangents shared forward, cotangents reduced backward; fan-out
+  accumulates; disconnected or shared request operands are typed refusals).
 - **Facet-pair kernels** (`facet.rs`, ARCHITECTURE.md §4/§8, SV2-B5):
   `FacetPairKernel { kernel, roles: Vec<FacetOperandRole> }` with
   `FacetOperandRole::Cell { side: Minus|Plus, partner: Option<OperandId> } | Facet { parity:
@@ -168,8 +167,8 @@ external operand, and composition binds buffers between verbatim kernels.
 
 Checks rerun successfully on 2026-10-19 (W11 M4 clone, `CARGO_PROFILE_TEST_OPT_LEVEL=2`):
 
-- `cargo test -p malleus --locked`: 68 tests passed (1 unit; composition 9; digest_pins 1;
-  facet_pair 6; interval_differential 1; interval_enclosures 5; interval_padding 2;
+- `cargo test -p malleus --locked`: 76 tests passed (1 unit; composition 9; digest_pins 1;
+  export 8; facet_pair 6; interval_differential 1; interval_enclosures 5; interval_padding 2;
   interval_soundness 3; output_dependency 6; policy 6; prepared 5; prepared_alloc 1;
   rust_source 4; structured_kernel 11; sv0_campaign 7).
 - `cargo test -p malleus-cranelift --locked`: 28 passed (3 unit; alloc 1; differential 13;
@@ -183,7 +182,8 @@ Checks rerun successfully on 2026-10-19 (W11 M4 clone, `CARGO_PROFILE_TEST_OPT_L
   cadabra3 toy, BoundBuffers refusals, JitState tables). No UB reported. Without the flag miri
   perturbs `fma` results by design (one bit test fails), so the flag is part of the command.
   Excluded for runtime (>280 s each under miri): `prepared_alloc`, `interval_soundness`. JIT
-  integration tests are `#![cfg(not(miri))]`.
+  integration tests are `#![cfg(not(miri))]`. W11 M4 added `export` (schema/golden/refusal
+  subset) to the script; that line ran 3/3 under miri on 2026-10-19 (21.9 s, no UB).
 - `cargo clippy -p malleus --all-targets -- -D warnings`
 - `RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps`
 - `cargo fmt --package malleus -- --check`; `git diff --check`

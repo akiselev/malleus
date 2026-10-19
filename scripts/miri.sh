@@ -11,4 +11,5 @@ run -p malleus --lib
 run -p malleus --test structured_kernel
 run -p malleus --test prepared -- malformed_bindings every_kernel_of_a_module prepared_compositions
 run -p malleus --test policy -- explicit_fma default_level validation_refuses
+run -p malleus --test export -- symbolic_schema fpcore_goldens oversized
 run -p malleus-cranelift --lib

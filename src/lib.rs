@@ -20,12 +20,14 @@ mod differentiate;
 mod digest;
 mod executable;
 mod facet;
+pub mod fpcore;
 mod interpreter;
 pub mod interval;
 mod ir;
 pub mod policy;
 pub mod prepared;
 pub mod rust;
+pub mod symbolic;
 mod validate;
 
 pub use campaign::{

@@ -288,7 +288,7 @@ fn predicate(
     })
 }
 
-fn offset(
+pub(crate) fn offset(
     indices: &[IndexExpr],
     shape: &[usize],
     minor_to_major: &[usize],
