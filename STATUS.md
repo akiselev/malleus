@@ -1,11 +1,49 @@
 # Malleus status
 
-Updated: 2026-10-18
+Updated: 2026-10-19
 Branch: `master`
-Milestone: W11 M4 interval upgrades (successor-bound padding, centered and affine
+Milestone: W11 M3 nonsmooth policy, Jacobian mode, exact post-AD simplification
+(`malleus::{ad, simplify}`); W11 M4 interval upgrades (successor-bound padding, centered and affine
 enclosures) and FPCore/symbolic export; W11 M2 numeric policy levels, explicit `Fma`, portable transcendentals; W11 M1
 prepared kernels and batched execution (`EXECUTION.md`); strict Rust
 source/unrolled and core interval lowering; W8/W7/SV0-B2 contracts retained
+
+## W11 M3 derivatives (modules `malleus::ad`, `malleus::simplify`)
+
+- **Behaviour fix (results were wrong before):** JVP tangents were looked up by *primal*
+  operand id on expressions already remapped to derivative-kernel ids, so a kernel declaring a
+  writable operand before a readable one got a wrong or silently zero tangent. Now keyed by the
+  remapped id. Kernels whose readable operands all precede writable ones are bitwise
+  unchanged (all fixtures, digest pins). `derivative_options::jvp_reads_tangents_of_operands_
+  declared_after_outputs` fails on the old code (0 instead of 3).
+- `ad::{DerivativeOptions { nonsmooth: NonsmoothPolicy { Conventional (default) | Refuse },
+  simplification: Simplification { None (default) | Exact } }, differentiate_with,
+  differentiate_jacobian, kink_sites, KinkSite { statement, kind: KinkKind { Abs, Floor, Ceil,
+  Min, Max, MinReduction, MaxReduction } }, JacobianProduct { product, columns:
+  [JacobianColumns { primal, offset, len }], seed_axis, width }, MAX_JACOBIAN_WIDTH = 2^24}`.
+  `DerivativeRequest` is unchanged (a new field would break consumer struct literals); options
+  travel beside it and serialize as `{}` at the default. New `DifferentiationError::
+  {NonsmoothRefused(Vec<KinkSite>), JacobianTooWide { columns }}`.
+- Kink sites (user decision D6): abs/min/max whose differentiated argument carries a
+  structural tangent from a requested independent; floor/ceil whose argument value varies with
+  one; stores into min/max reductions; only statements reaching a requested dependent; select
+  is not a kink (conditions are never differentiated). `Conventional` keeps d|x|(0) = +dx,
+  min/max tie -> lhs tangent, floor/ceil -> 0; `Refuse` names every site.
+- `DerivativeMode::Jacobian` is admitted by `differentiate` (was `UnsupportedMode`;
+  compositions still refuse it): vector forward mode over a trailing `Parallel` seed axis of
+  extent `width`; the identity seed is `select(column(p) == s, 1, 0)` with an exactly formed
+  column index; output `d_y` has shape `S ++ [width]` (row-major extension, region offset 0,
+  same access). Bitwise equal to per-seed JVPs; runs through `PreparedKernel::run_batch`.
+- `simplify::simplify_exact(&kernel) -> Simplified { kernel, rewrites }`: `x*1`, `1*x`,
+  `x-(+0)`, `x+(-0)`, `(-0)+x`, `--x`, CSE (bit-keyed hash-consing into new lets; skipped with
+  read-write operands), dead `Write` stores overwritten later, `-0` stores into `Reduce(Add)`
+  and `1` into `Reduce(Multiply)`. Never `x+0`, `x*0`, `+0` reduce stores, reassociation.
+  Opt-in only (`Simplification::Exact`): default derivative kernels and digests are unchanged.
+- Proof: `tests/derivative_options.rs` (7): default options == `differentiate` on every
+  fixture family; refusal sites; Jacobian == identity-seed JVPs on fixtures + 40 random
+  kernels (and batched); simplified == unsimplified bitwise on fixtures + 300 random kernels
+  (abs/min/max/sqrt/div/fma/select/floor, f32 and f64) with NaN/inf/+-0 inputs, for primal,
+  JVP, VJP and Jacobian kernels.
 
 ## Numeric policy levels (W11 M2, module `malleus::policy`)
 
@@ -165,70 +203,39 @@ external operand, and composition binds buffers between verbatim kernels.
 
 ## Validation
 
-Checks rerun successfully on 2026-10-19 (W11 M4 clone, `CARGO_PROFILE_TEST_OPT_LEVEL=2`):
+Checks rerun on 2026-10-19 (W11 M3 clone, `CARGO_PROFILE_TEST_OPT_LEVEL=2`, `CARGO_BUILD_JOBS=4`):
 
-- `cargo test -p malleus --locked`: 76 tests passed (1 unit; composition 9; digest_pins 1;
-  export 8; facet_pair 6; interval_differential 1; interval_enclosures 5; interval_padding 2;
-  interval_soundness 3; output_dependency 6; policy 6; prepared 5; prepared_alloc 1;
-  rust_source 4; structured_kernel 11; sv0_campaign 7).
+- `cargo test -p malleus --locked`: 83 passed (1 unit; composition 9; derivative_options 7;
+  digest_pins 1; export 8; facet_pair 6; interval_differential 1; interval_enclosures 5;
+  interval_padding 2; interval_soundness 3; output_dependency 6; policy 6; prepared 5;
+  prepared_alloc 1; rust_source 4; structured_kernel 11; sv0_campaign 7). `prepared_alloc`
+  failed once under host contention (its global allocation counter is process-wide) and
+  passed on 3 reruns; pre-existing, not touched by M3.
 - `cargo test -p malleus-cranelift --locked`: 28 passed (3 unit; alloc 1; differential 13;
-  interval 4; interval_random 2 (adds centered/affine JIT-vs-interpreter: 71 of 120 lowered
-  programs compiled, the rest exceed the JIT budget); native 5).
-- clippy `-D warnings`, rustdoc `-D warnings`, `cargo fmt -p <crate> -- --check` for both crates.
-- Miri (`scripts/miri.sh`, nightly miri 2026-07-08, `MIRIFLAGS=-Zmiri-deterministic-floats`;
-  run once, Stacked Borrows): core `--lib` 1/1, `structured_kernel` 11/11, `prepared`
-  binding/module/composition tests 3/3, `policy` fma/serialization/validation 3/3;
-  `malleus-cranelift --lib` 3/3 (PreparedCall pointer re-derivation regression ported from the
-  cadabra3 toy, BoundBuffers refusals, JitState tables). No UB reported. Without the flag miri
-  perturbs `fma` results by design (one bit test fails), so the flag is part of the command.
-  Excluded for runtime (>280 s each under miri): `prepared_alloc`, `interval_soundness`. JIT
-  integration tests are `#![cfg(not(miri))]`. W11 M4 added `export` (schema/golden/refusal
-  subset) to the script; that line ran 3/3 under miri on 2026-10-19 (21.9 s, no UB).
-- `cargo clippy -p malleus --all-targets -- -D warnings`
-- `RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps`
-- `cargo fmt --package malleus -- --check`; `git diff --check`
-Proof tests for W7/W8 packages: `tests/{composition,facet_pair,output_dependency}.rs`.
+  interval 4; interval_random 2; native 5).
+- clippy `-D warnings` (both crates, all targets), rustdoc `-D warnings`,
+  `cargo fmt -p malleus -- --check`.
+- Miri (`scripts/miri.sh`, `MIRIFLAGS=-Zmiri-deterministic-floats`, Stacked Borrows; last full
+  run W11 M2/M4 2026-10-19, no UB): core `--lib`, `structured_kernel`, `prepared`/`policy`/
+  `export` subsets, `malleus-cranelift --lib`. Excluded for runtime: `prepared_alloc`,
+  `interval_soundness`; JIT integration tests are `#![cfg(not(miri))]`.
 
 ## Prepared execution measurements (W11 M1)
 
-`cargo run --release --example prepared_bench`, 2026-10-18, Intel i7-8850H (12 threads)
-**under heavy contention (load average 64-76)**: absolute numbers are inflated several-fold
-and noisy; ratios are indicative only. Median of seven batches, ~20 ms each, time per call;
-"batched" = one `run_batch` over 64 strided independent points (10^5 for the property
-kernel), per point. All four paths are compared bitwise before timing.
-
-| Kernel | Interpreter | Prepared one-shot | Prepared reusable | Batched (per point) |
-|---|---:|---:|---:|---:|
-| One guard polynomial | 1.14 us | 1.04 us | 222.9 ns | 55.6 ns |
-| 64 guard evaluations | 36.13 us | 19.50 us | 10.10 us | 1.70 us |
-| 4,096 guard evaluations | 2.32 ms | 1.25 ms | 1.11 ms | 184.01 us |
-| Quadratic JVP, 1,024 inputs | 1.51 ms | 176.60 us | 376.86 us | 37.84 us |
-| Quadratic VJP, 1,024 inputs | 515.68 us | 149.08 us | 264.47 us | 99.11 us |
-| Dense matvec 64x64 | 1.65 ms | 404.26 us | 1.06 ms | 216.30 us |
-| Property kernel, 10^5 point calls | 1.50 us | 1.86 us | 614.0 ns | 74.3 ns |
-
-The historical Cranelift table in `crates/malleus-cranelift/README.md` was measured on a
-different, idle host (EPYC 9V74); do not compare across the two tables. Rerun on an idle
-host before quoting speedups.
+`cargo run --release --example prepared_bench`, 2026-10-18, i7-8850H under heavy contention
+(load 64-76; ratios only). Per call, interpreter / prepared reusable / batched per point:
+one guard polynomial 1.14 us / 222.9 ns / 55.6 ns; quadratic JVP 1,024 inputs 1.51 ms /
+376.86 us / 37.84 us; matvec 64x64 1.65 ms / 1.06 ms / 216.30 us; property kernel 1.50 us /
+614.0 ns / 74.3 ns. All paths compared bitwise before timing (full table in git history).
 
 ## W11 M2 backend measurements
 
-`cargo run -p malleus-cranelift --release --locked --quiet > crates/malleus-cranelift/results-m2.json`,
-2026-10-19, Intel i7-8850H, **contended host (load average 22-41)**: ratios indicative only.
-ns per call, median of 7 batches; "/pt" = one call over 64 independent strided points, per
-point. Every path is checked bitwise against the interpreter (batches against 64 sequential
-interpreter calls) before timing. Batched Rust: `lower_rust_batched` width 8 via `rustc -O`.
-
-| Kernel | Interpreter | M1 prepared | M1 batch/pt | JIT checked | JIT prepared | JIT positional | JIT batch/pt | Batched Rust/pt | JIT compile |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| guard-polynomial-1 | 919.5 | 265.4 | 31.4 | 270.2 | 42.0 | 126.8 | 16.7 | 2.3 | 1629 us |
-| guard-polynomial-64 | 38228.3 | 10124.8 | 1496.0 | 837.4 | 621.9 | 653.4 | 629.0 | 66.0 | 1337 us |
-| guard-polynomial-4096 | 2394836.0 | 576093.6 | 119849.6 | 38611.1 | 39118.2 | 35654.9 | 42631.5 | 13651.3 | 1285 us |
-| quadratic-Jvp-1024 | 908558.5 | 246533.6 | 57154.2 | 10817.5 | 11248.5 | 11412.0 | 11550.4 | 2731.6 | 1525 us |
-| quadratic-Vjp-1024 | 919162.8 | 225710.5 | 57699.3 | 12639.1 | 13417.0 | 13288.2 | 12258.7 | 17583.0 | 1539 us |
-| matvec-64x64 | 1594166.4 | 316180.1 | 82548.6 | 28286.0 | 29649.8 | 29733.6 | 34679.4 | 5212.1 | 1514 us |
-
-Positional JIT `call` costs ~85 ns over borrowed `PreparedCall::run` (1-point kernel: binding checks + pointer table); batching amortizes it.
+`cargo run -p malleus-cranelift --release --locked --quiet > crates/malleus-cranelift/results-m2.json`
+(2026-10-19, i7-8850H, contended, load 22-41: ratios indicative; full table in that file).
+ns per point, interpreter / M1 batch / JIT batch / batched Rust: guard-polynomial-64
+38228 / 1496 / 629 / 66; quadratic-Jvp-1024 908559 / 57154 / 11550 / 2732; matvec-64x64
+1594166 / 82549 / 34679 / 5212. JIT compile 1.3-1.6 ms. Positional JIT `call` ~85 ns over
+borrowed `PreparedCall::run`.
 
 ## Contract shapes landed (for GX-CONTRACTS C12)
 
@@ -252,26 +259,10 @@ Positional JIT `call` costs ~85 ns over borrowed `PreparedCall::run` (1-point ke
 
 ## Deviations from `sinbad/ARCHITECTURE.md` and why
 
-- §6 says the cross block is the product of two local point kernels evaluated by Finitum at
-  quadrature points. Malleus makes that product a typed, digested object (`differentiate_composition`
-  with the independent set restricted to the producer's inputs yields exactly the consumer input
-  tangent composed with the producer output tangent) instead of a pair of closures, so the
-  chain rule has an identity, a wire form, and an interpreter proof. Finitum may still evaluate
-  the two kernels itself; the composition is the contract, not a mandate to change its loop.
-- Binding is buffer-level between whole stage invocations, not per-quadrature-point value
-  passing. This is what makes tensor-valued outputs, reduced outputs, and fan-out well-defined
-  without touching kernel bodies; it also means a composition never crosses a mesh (that is
-  `BoundChain::Transferred`, Finitum/Krasis).
-- Trace classes (`Value`/`Normal`/`Tangential`/`FacetL2`, §3.4) are not recorded on facet-pair
-  operands: they are function-space vocabulary owned by Scientia. Malleus records only side
-  ownership, partners, and swap parity, which is all the kernel's covariance needs.
-
-## Consumer surface changes required (recorded for the Scientia/Finitum lanes)
-
-- Scientia: lower `output` declarations to point-kernel bundles; `SysBlock::Composed` builds a
-  `KernelComposition` whose `composition_digest` joins the system artifact chain.
-- Finitum: composed `bind_kernels`/`execute` binding `StageOperand`s and recording
-  `composition_digest`; facet-pair traversal for minus/plus traces (SV2-B2).
+- §6 cross blocks are a typed, digested `differentiate_composition` product instead of a pair of
+  closures; binding is buffer-level between whole stage invocations (tensor outputs, reductions
+  and fan-out stay well-defined; a composition never crosses a mesh). Trace classes are Scientia
+  vocabulary; facet-pair operands record only sides, partners and swap parity.
 
 ## Current limits and next work
 
@@ -295,6 +286,7 @@ Positional JIT `call` costs ~85 ns over borrowed `PreparedCall::run` (1-point ke
 - Interval upgrades (W11 M4): Taylor models are open; centered/affine admit only the naive
   op set; the centered form differentiates once per read operand (expanded JVPs can hit the
   typed lowering budget, <2% of random 4-input programs).
-- Materialized Jacobians and differentiation through read-write operands remain refusals.
+- Differentiation through read-write operands remains a refusal; compositions refuse
+  Jacobian mode and take no `DerivativeOptions` yet.
 - Bounds and simple injective-write maps are proved conservatively; general affine
   injectivity remains future work before production parallel schedules.

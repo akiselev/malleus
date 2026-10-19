@@ -3,6 +3,7 @@
 
 pub mod dyadic;
 pub mod fixtures;
+pub mod kernels;
 
 use dyadic::Dyadic;
 use malleus::interval::{IntervalProgram, lower_intervals};

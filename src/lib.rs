@@ -13,6 +13,7 @@
 //! operand. Both carry deterministic digests built from the verbatim kernel digests.
 #![forbid(unsafe_code)]
 
+pub mod ad;
 mod campaign;
 mod compose;
 mod dependency;
@@ -27,6 +28,7 @@ mod ir;
 pub mod policy;
 pub mod prepared;
 pub mod rust;
+pub mod simplify;
 pub mod symbolic;
 mod validate;
 

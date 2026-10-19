@@ -5,9 +5,10 @@ use std::error::Error;
 use std::fmt;
 
 use crate::{
-    AccessMode, BinaryOp, DerivativeMode, DerivativeOperand, DerivativeProduct, DerivativeRequest,
-    IndexingMap, KernelOperand, KernelRegion, LocalId, OperandId, Predicate, ReductionOp,
-    ScalarExpr, Statement, StructuredKernel, UnaryOp,
+    AccessMode, AxisId, BinaryOp, BufferRegion, DenseLayout, DerivativeMode, DerivativeOperand,
+    DerivativeProduct, DerivativeRequest, IndexExpr, IndexingMap, IteratorKind, KernelOperand,
+    KernelRegion, LocalId, OperandId, Predicate, ReductionOp, ScalarExpr, Statement,
+    StructuredKernel, UnaryOp,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,6 +25,13 @@ pub enum DifferentiationError {
     DependentNotWritten(usize),
     MissingIndexingMap(usize),
     UnsupportedReadWriteOperand(usize),
+    /// `NonsmoothPolicy::Refuse` and these kink sites are differentiated (`malleus::ad`).
+    NonsmoothRefused(Vec<crate::ad::KinkSite>),
+    /// A Jacobian wider than `ad::MAX_JACOBIAN_WIDTH` columns, or whose column index
+    /// expression is not exact in `f32` arithmetic.
+    JacobianTooWide {
+        columns: usize,
+    },
 }
 
 impl fmt::Display for DifferentiationError {
@@ -48,15 +56,13 @@ pub fn differentiate(
     let product = match request.mode {
         DerivativeMode::Jvp => jvp(primal, request),
         DerivativeMode::Vjp => vjp(primal, request),
-        DerivativeMode::Jacobian => Err(DifferentiationError::UnsupportedMode(
-            DerivativeMode::Jacobian,
-        )),
+        DerivativeMode::Jacobian => jacobian(primal, request).map(|j| j.product),
     }?;
     crate::validate(product.kernel.clone()).map_err(DifferentiationError::InvalidDerivative)?;
     Ok(product)
 }
 
-fn validate_request(
+pub(crate) fn validate_request(
     primal: &StructuredKernel,
     request: &DerivativeRequest,
 ) -> Result<(), DifferentiationError> {
@@ -139,6 +145,11 @@ fn jvp(
         });
     }
 
+    // Tangents are looked up on the remapped (derivative-kernel) operand ids of the loads.
+    let tangent_loads = tangent_by_primal
+        .iter()
+        .map(|(primal_id, derivative)| (primal_remap[primal_id], ScalarExpr::Load(*derivative)))
+        .collect();
     let expanded = expanded_stores(primal)?;
     let mut statements = Vec::new();
     for (dependent, value) in expanded {
@@ -148,7 +159,7 @@ fn jvp(
         let value = remap_expr(&value, &primal_remap);
         statements.push(Statement::Store {
             operand: output,
-            value: simplify(directional(&value, &tangent_by_primal)),
+            value: simplify(directional(&value, &tangent_loads)),
         });
     }
 
@@ -167,6 +178,172 @@ fn jvp(
         independent_operands,
         dependent_operands,
     })
+}
+
+/// The dense Jacobian kernel (`malleus::ad::JacobianProduct` documents the layout).
+pub(crate) fn jacobian(
+    primal: &StructuredKernel,
+    request: &DerivativeRequest,
+) -> Result<crate::ad::JacobianProduct, DifferentiationError> {
+    let (mut operands, mut maps, primal_remap) = readable_primal_operands(primal)?;
+    let rank = primal.iteration_domain.rank();
+    let seed_axis = AxisId::new(rank);
+    let mut extents = primal.iteration_domain.extents.clone();
+    let mut columns = Vec::new();
+    let mut width = 0usize;
+    let mut seed_maps = Vec::new();
+    for primal_id in &request.independent_operands {
+        let definition = &primal.operands[primal_id.index()];
+        let len = definition.shape.iter().product::<usize>();
+        columns.push(crate::ad::JacobianColumns {
+            primal: *primal_id,
+            offset: width,
+            len,
+        });
+        let map = remap_map(primal, *primal_id, *primal_id)?;
+        seed_maps.push((
+            primal_remap[primal_id],
+            map.results,
+            width,
+            &definition.shape,
+        ));
+        width = width
+            .checked_add(len)
+            .filter(|width| *width <= crate::ad::MAX_JACOBIAN_WIDTH)
+            .ok_or(DifferentiationError::JacobianTooWide {
+                columns: usize::MAX,
+            })?;
+    }
+    let too_wide = DifferentiationError::JacobianTooWide { columns: width };
+    let mut seeds = BTreeMap::new();
+    for (operand, results, offset, shape) in seed_maps {
+        let column = column_expr(&results, shape, offset, &extents).ok_or(too_wide.clone())?;
+        seeds.insert(
+            operand,
+            ScalarExpr::Select {
+                condition: Box::new(Predicate::Compare {
+                    op: crate::CompareOp::Eq,
+                    lhs: Box::new(column),
+                    rhs: Box::new(ScalarExpr::Index(seed_axis)),
+                }),
+                if_true: Box::new(ScalarExpr::Constant(1.0)),
+                if_false: Box::new(ScalarExpr::Constant(0.0)),
+            },
+        );
+    }
+    extents.push(width);
+
+    let mut dependent_by_primal = BTreeMap::new();
+    let mut dependent_operands = Vec::new();
+    for primal_id in &request.dependent_operands {
+        let derivative = OperandId::new(operands.len());
+        let definition = &primal.operands[primal_id.index()];
+        let mut shape = definition.shape.clone();
+        let elements = shape
+            .iter()
+            .product::<usize>()
+            .checked_mul(width)
+            .ok_or(too_wide.clone())?;
+        shape.push(width);
+        let mut minor_to_major = vec![definition.shape.len()];
+        minor_to_major.extend(&definition.layout.minor_to_major);
+        operands.push(KernelOperand {
+            name: format!("d_{}", definition.name),
+            shape,
+            region: BufferRegion::new(0, elements),
+            layout: DenseLayout { minor_to_major },
+            access: definition.access,
+        });
+        let mut map = remap_map(primal, *primal_id, derivative)?;
+        map.results.push(IndexExpr::axis(seed_axis));
+        maps.push(map);
+        dependent_by_primal.insert(*primal_id, derivative);
+        dependent_operands.push(DerivativeOperand {
+            primal: *primal_id,
+            derivative,
+        });
+    }
+
+    let mut statements = Vec::new();
+    for (dependent, value) in expanded_stores(primal)? {
+        let Some(output) = dependent_by_primal.get(&dependent).copied() else {
+            continue;
+        };
+        let value = remap_expr(&value, &primal_remap);
+        statements.push(Statement::Store {
+            operand: output,
+            value: simplify(directional(&value, &seeds)),
+        });
+    }
+    let mut iterators = primal.iterators.clone();
+    iterators.push(IteratorKind::Parallel);
+    Ok(crate::ad::JacobianProduct {
+        product: DerivativeProduct {
+            mode: DerivativeMode::Jacobian,
+            kernel: StructuredKernel {
+                name: format!("{}::jacobian", primal.name),
+                iteration_domain: crate::IterationDomain::new(extents),
+                iterators,
+                operands,
+                indexing_maps: maps,
+                body: KernelRegion { statements },
+                numeric_policy: primal.numeric_policy,
+            },
+            primal_operands: primal_operand_pairs(&primal_remap),
+            independent_operands: Vec::new(),
+            dependent_operands,
+        },
+        columns,
+        seed_axis,
+        width,
+    })
+}
+
+/// `offset + row-major flat index of results` as an exact scalar expression over the axes,
+/// or `None` when some partial sum could exceed `MAX_JACOBIAN_WIDTH` in magnitude.
+fn column_expr(
+    results: &[IndexExpr],
+    shape: &[usize],
+    offset: usize,
+    extents: &[usize],
+) -> Option<ScalarExpr> {
+    let limit = crate::ad::MAX_JACOBIAN_WIDTH as i128;
+    let mut constant = offset as i128;
+    let mut coefficients = vec![0i128; extents.len()];
+    let mut stride = 1i128;
+    for (result, extent) in results.iter().zip(shape).rev() {
+        constant += stride * result.constant as i128;
+        for term in &result.terms {
+            coefficients[term.axis.index()] += stride * term.coefficient as i128;
+        }
+        stride *= *extent as i128;
+    }
+    let mut bound = constant.abs();
+    let mut expr = (constant != 0).then_some(ScalarExpr::Constant(constant as f64));
+    for (axis, coefficient) in coefficients.iter().enumerate() {
+        if *coefficient == 0 {
+            continue;
+        }
+        bound += coefficient.abs() * extents[axis].saturating_sub(1) as i128;
+        if bound > limit {
+            return None;
+        }
+        let index = ScalarExpr::Index(AxisId::new(axis));
+        let term = if *coefficient == 1 {
+            index
+        } else {
+            ScalarExpr::binary(
+                BinaryOp::Mul,
+                ScalarExpr::Constant(*coefficient as f64),
+                index,
+            )
+        };
+        expr = Some(match expr {
+            None => term,
+            Some(sum) => ScalarExpr::binary(BinaryOp::Add, sum, term),
+        });
+    }
+    (bound <= limit).then(|| expr.unwrap_or(ScalarExpr::Constant(0.0)))
 }
 
 fn vjp(
@@ -413,12 +590,11 @@ fn remap_predicate(predicate: &Predicate, operands: &BTreeMap<OperandId, Operand
     }
 }
 
-fn directional(expr: &ScalarExpr, tangents: &BTreeMap<OperandId, OperandId>) -> ScalarExpr {
+fn directional(expr: &ScalarExpr, tangents: &BTreeMap<OperandId, ScalarExpr>) -> ScalarExpr {
     derivative(expr, &mut |operand| {
         tangents
             .get(&operand)
-            .copied()
-            .map(ScalarExpr::Load)
+            .cloned()
             .unwrap_or(ScalarExpr::Constant(0.0))
     })
 }
