@@ -1,10 +1,10 @@
+use malleus::prepared::{PreparedKernel, PreparedRunner, PreparedState, ReadBinding, WriteBinding};
 use malleus::{
     AccessMode, AxisId, BinaryOp, CampaignError, ComparisonTolerance, Executable, IndexExpr,
     IndexingMap, IterationDomain, IteratorKind, KernelOperand, KernelRegion, LocalCheckKind,
     LocalDifferentialCase, LocalExecutableRunner, NumericPolicy, NumericPolicyMutation, OperandId,
-    OperandValues, PreparedKernel, PreparedRunner, PreparedState, ReadBinding, ReductionOp,
-    ScalarExpr, ScalarType, Statement, StructuredKernel, StructuredModule, WriteBinding,
-    check_numeric_policy_mutation, run_local_differential_campaign,
+    OperandValues, ReductionOp, ScalarExpr, ScalarType, Statement, StructuredKernel,
+    StructuredModule, check_numeric_policy_mutation, run_local_differential_campaign,
 };
 
 fn quadratic_module() -> StructuredModule {

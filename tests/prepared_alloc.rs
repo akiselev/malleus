@@ -6,6 +6,7 @@ mod support;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use malleus::prepared::*;
 use malleus::*;
 use support::fixtures;
 

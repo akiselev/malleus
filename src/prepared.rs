@@ -1,4 +1,5 @@
-//! Prepared kernels: an [`Executable`] flattened once into register bytecode, executed with
+//! Prepared kernels (`malleus::prepared`; deliberately not re-exported at the crate root, so
+//! `use malleus::*` consumers see no new names): an [`Executable`] flattened once into register bytecode, executed with
 //! no per-call heap allocation, one point at a time or columnar over a batch of points.
 //!
 //! [`PreparedKernel::new`] resolves every operand to a binding slot, folds each indexing map,

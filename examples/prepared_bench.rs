@@ -15,6 +15,7 @@ mod fixtures;
 use std::hint::black_box;
 use std::time::Instant;
 
+use malleus::prepared::*;
 use malleus::*;
 
 fn median_ns(mut call: impl FnMut()) -> f64 {

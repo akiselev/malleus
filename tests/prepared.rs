@@ -2,6 +2,7 @@
 
 mod support;
 
+use malleus::prepared::*;
 use malleus::*;
 use support::{Rng, fixtures};
 

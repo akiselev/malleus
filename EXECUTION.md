@@ -2,7 +2,8 @@
 
 `Interpreter` stays the reference oracle. `PreparedKernel` is a second execution path that is
 bitwise identical to it (NaNs equivalent) and is built for call-heavy consumers such as one
-call per quadrature point. Neither path changes IR, `kernel_digest` or serialized bytes.
+call per quadrature point. Its API lives in the `malleus::prepared` module and is not
+re-exported at the crate root (consumers using `use malleus::*` see no new names). Neither path changes IR, `kernel_digest` or serialized bytes.
 
 ## Preparation
 

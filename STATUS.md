@@ -7,7 +7,7 @@ source/unrolled and core interval lowering; W8/W7/SV0-B2 contracts retained
 
 ## Local backends
 
-- Core `PreparedKernel` (W11 M1): an `Executable` compiled once into register bytecode
+- Core `malleus::prepared::PreparedKernel` (W11 M1; module-scoped, no root re-exports): an `Executable` compiled once into register bytecode
   (lazy point program + eager columnar program), affine addresses folded and proven in
   range at preparation, positional `ReadBinding`/`WriteBinding` calls with zero heap
   allocation on a sized `PreparedState`, Interpreter-compatible checked `run`, and
@@ -181,7 +181,8 @@ host before quoting speedups.
 - `FacetPairKernel`, `FacetOperandRole`, `FacetSide`, `SwapParity`, `FACET_NORMAL_CONVENTION`,
   `FacetPairDerivativeProduct`, `FacetSwapReport`, `FacetPairError`, `FacetSwapError`.
 - `DerivativeProduct::primal_operands` (additive).
-- W11 M1 (additive, no serialized form): `PreparedKernel { new, run, call, run_batch,
+- W11 M1 (additive, no serialized form, module `malleus::prepared` only; new root-level
+  names: only the module name `prepared`): `PreparedKernel { new, run, call, run_batch,
   read_operands, write_operands, required_len, state }`, `PreparedState`, `ReadBinding` /
   `WriteBinding { operand, values, stride }`, `BATCH_BLOCK = 32`, `CallError { ReadCount,
   WriteCount, ReadOperand, WriteOperand, ShortBuffer, ExtentOverflow }`, `PrepareError {
