@@ -45,6 +45,9 @@ pub enum ValidationError {
     InvalidStore(usize),
     NonFiniteConstant,
     DuplicateKernelName(String),
+    /// `FmaPolicy::Allowed` or `Reassociation::Allowed` at a level other than `StrictHost`
+    /// (see `malleus::policy`).
+    ImpreciseNumericPolicy,
 }
 
 impl fmt::Display for ValidationError {
@@ -94,6 +97,13 @@ pub fn validate(kernel: StructuredKernel) -> Result<ValidatedKernel, ValidationE
             expected: kernel.iteration_domain.rank(),
             actual: kernel.iterators.len(),
         });
+    }
+    let policy = kernel.numeric_policy;
+    if !policy.level.is_strict_host()
+        && (policy.fma != crate::FmaPolicy::Forbidden
+            || policy.reassociation != crate::Reassociation::Forbidden)
+    {
+        return Err(ValidationError::ImpreciseNumericPolicy);
     }
     let mut names = BTreeSet::new();
     for (operand_index, operand) in kernel.operands.iter().enumerate() {
@@ -312,6 +322,11 @@ fn validate_expr(
         ScalarExpr::Binary { lhs, rhs, .. } => {
             validate_expr(lhs, kernel, locals)?;
             validate_expr(rhs, kernel, locals)
+        }
+        ScalarExpr::Fma { lhs, rhs, addend } => {
+            validate_expr(lhs, kernel, locals)?;
+            validate_expr(rhs, kernel, locals)?;
+            validate_expr(addend, kernel, locals)
         }
         ScalarExpr::Select {
             condition,

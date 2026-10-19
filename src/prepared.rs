@@ -22,7 +22,8 @@
 use std::error::Error;
 use std::fmt;
 
-use crate::interpreter::{binary, cast, compare, unary};
+use crate::interpreter::{cast, compare};
+use crate::policy::{MathLibrary, binary, fma, unary};
 use crate::{
     AccessMode, BinaryOp, BufferBinding, CompareOp, CompositionBinding, CompositionExecutionError,
     CompositionTarget, Executable, ExecutableComposition, ExecutableModule, ExecutionError,
@@ -229,6 +230,12 @@ enum Instr {
         lhs: u32,
         rhs: u32,
     },
+    Fma {
+        dst: u32,
+        lhs: u32,
+        rhs: u32,
+        addend: u32,
+    },
     Compare {
         op: CompareOp,
         dst: u32,
@@ -305,6 +312,7 @@ struct Program {
 pub struct PreparedKernel {
     name: String,
     scalar_type: ScalarType,
+    math: MathLibrary,
     extents: Vec<usize>,
     order: Vec<usize>,
     empty: bool,
@@ -499,6 +507,7 @@ impl PreparedKernel {
         Ok(Self {
             name: kernel.name.clone(),
             scalar_type: kernel.numeric_policy.scalar_type,
+            math: kernel.numeric_policy.level.math(),
             extents,
             order,
             empty,
@@ -828,10 +837,24 @@ impl PreparedKernel {
                 }
                 Instr::Move { dst, src } => r[dst as usize] = r[src as usize],
                 Instr::Unary { op, dst, src } => {
-                    r[dst as usize] = unary(op, r[src as usize], P::TYPE)
+                    r[dst as usize] = unary(op, r[src as usize], P::TYPE, self.math)
                 }
                 Instr::Binary { op, dst, lhs, rhs } => {
-                    r[dst as usize] = binary(op, r[lhs as usize], r[rhs as usize], P::TYPE)
+                    r[dst as usize] =
+                        binary(op, r[lhs as usize], r[rhs as usize], P::TYPE, self.math)
+                }
+                Instr::Fma {
+                    dst,
+                    lhs,
+                    rhs,
+                    addend,
+                } => {
+                    r[dst as usize] = fma(
+                        r[lhs as usize],
+                        r[rhs as usize],
+                        r[addend as usize],
+                        P::TYPE,
+                    )
                 }
                 Instr::Compare { op, dst, lhs, rhs } => {
                     f[dst as usize] = compare(op, r[lhs as usize], r[rhs as usize])
@@ -877,7 +900,7 @@ impl PreparedKernel {
                         StoreMode::Assign => memory.write(slot, index, value),
                         StoreMode::Reduce(op) => {
                             let old = memory.read_writable(slot, index);
-                            memory.write(slot, index, binary(op, old, value, P::TYPE));
+                            memory.write(slot, index, binary(op, old, value, P::TYPE, self.math));
                         }
                     }
                 }
@@ -970,12 +993,27 @@ impl PreparedKernel {
                 Instr::Move { dst, src } => r.copy_within(at(src)..at(src) + B, at(dst)),
                 Instr::Unary { op, dst, src } => {
                     let x: [f64; B] = r[at(src)..at(src) + B].try_into().expect("block");
-                    unary_lanes::<P>(op, &x, &mut r[at(dst)..at(dst) + B]);
+                    unary_lanes::<P>(op, self.math, &x, &mut r[at(dst)..at(dst) + B]);
                 }
                 Instr::Binary { op, dst, lhs, rhs } => {
                     let x: [f64; B] = r[at(lhs)..at(lhs) + B].try_into().expect("block");
                     let y: [f64; B] = r[at(rhs)..at(rhs) + B].try_into().expect("block");
-                    binary_lanes::<P>(op, &x, &y, &mut r[at(dst)..at(dst) + B]);
+                    binary_lanes::<P>(op, self.math, &x, &y, &mut r[at(dst)..at(dst) + B]);
+                }
+                Instr::Fma {
+                    dst,
+                    lhs,
+                    rhs,
+                    addend,
+                } => {
+                    for lane in 0..B {
+                        r[at(dst) + lane] = fma(
+                            r[at(lhs) + lane],
+                            r[at(rhs) + lane],
+                            r[at(addend) + lane],
+                            P::TYPE,
+                        );
+                    }
                 }
                 Instr::Compare { op, dst, lhs, rhs } => {
                     for lane in 0..B {
@@ -1029,7 +1067,9 @@ impl PreparedKernel {
                         let target = &mut binding.values[(first + lane) * binding.stride + index];
                         *target = match mode {
                             StoreMode::Assign => *value,
-                            StoreMode::Reduce(op) => binary(op, *target, *value, P::TYPE),
+                            StoreMode::Reduce(op) => {
+                                binary(op, *target, *value, P::TYPE, self.math)
+                            }
                         };
                     }
                 }
@@ -1075,39 +1115,40 @@ macro_rules! lanes {
 /// Hoists the operation dispatch out of the lane loop; each arm calls the interpreter's own
 /// scalar operation with a constant operation, so the per-lane arithmetic is identical.
 #[inline(always)]
-fn unary_lanes<P: Precision>(op: UnaryOp, x: &[f64; BATCH_BLOCK], out: &mut [f64]) {
+fn unary_lanes<P: Precision>(op: UnaryOp, m: MathLibrary, x: &[f64; BATCH_BLOCK], out: &mut [f64]) {
     use UnaryOp::*;
     match op {
-        Neg => lanes!(out, l, unary(Neg, x[l], P::TYPE)),
-        Abs => lanes!(out, l, unary(Abs, x[l], P::TYPE)),
-        Sqrt => lanes!(out, l, unary(Sqrt, x[l], P::TYPE)),
-        Exp => lanes!(out, l, unary(Exp, x[l], P::TYPE)),
-        Ln => lanes!(out, l, unary(Ln, x[l], P::TYPE)),
-        Sin => lanes!(out, l, unary(Sin, x[l], P::TYPE)),
-        Cos => lanes!(out, l, unary(Cos, x[l], P::TYPE)),
-        Tan => lanes!(out, l, unary(Tan, x[l], P::TYPE)),
-        Floor => lanes!(out, l, unary(Floor, x[l], P::TYPE)),
-        Ceil => lanes!(out, l, unary(Ceil, x[l], P::TYPE)),
+        Neg => lanes!(out, l, unary(Neg, x[l], P::TYPE, m)),
+        Abs => lanes!(out, l, unary(Abs, x[l], P::TYPE, m)),
+        Sqrt => lanes!(out, l, unary(Sqrt, x[l], P::TYPE, m)),
+        Exp => lanes!(out, l, unary(Exp, x[l], P::TYPE, m)),
+        Ln => lanes!(out, l, unary(Ln, x[l], P::TYPE, m)),
+        Sin => lanes!(out, l, unary(Sin, x[l], P::TYPE, m)),
+        Cos => lanes!(out, l, unary(Cos, x[l], P::TYPE, m)),
+        Tan => lanes!(out, l, unary(Tan, x[l], P::TYPE, m)),
+        Floor => lanes!(out, l, unary(Floor, x[l], P::TYPE, m)),
+        Ceil => lanes!(out, l, unary(Ceil, x[l], P::TYPE, m)),
     }
 }
 
 #[inline(always)]
 fn binary_lanes<P: Precision>(
     op: BinaryOp,
+    m: MathLibrary,
     x: &[f64; BATCH_BLOCK],
     y: &[f64; BATCH_BLOCK],
     out: &mut [f64],
 ) {
     use BinaryOp::*;
     match op {
-        Add => lanes!(out, l, binary(Add, x[l], y[l], P::TYPE)),
-        Sub => lanes!(out, l, binary(Sub, x[l], y[l], P::TYPE)),
-        Mul => lanes!(out, l, binary(Mul, x[l], y[l], P::TYPE)),
-        Div => lanes!(out, l, binary(Div, x[l], y[l], P::TYPE)),
-        Pow => lanes!(out, l, binary(Pow, x[l], y[l], P::TYPE)),
-        Min => lanes!(out, l, binary(Min, x[l], y[l], P::TYPE)),
-        Max => lanes!(out, l, binary(Max, x[l], y[l], P::TYPE)),
-        Atan2 => lanes!(out, l, binary(Atan2, x[l], y[l], P::TYPE)),
+        Add => lanes!(out, l, binary(Add, x[l], y[l], P::TYPE, m)),
+        Sub => lanes!(out, l, binary(Sub, x[l], y[l], P::TYPE, m)),
+        Mul => lanes!(out, l, binary(Mul, x[l], y[l], P::TYPE, m)),
+        Div => lanes!(out, l, binary(Div, x[l], y[l], P::TYPE, m)),
+        Pow => lanes!(out, l, binary(Pow, x[l], y[l], P::TYPE, m)),
+        Min => lanes!(out, l, binary(Min, x[l], y[l], P::TYPE, m)),
+        Max => lanes!(out, l, binary(Max, x[l], y[l], P::TYPE, m)),
+        Atan2 => lanes!(out, l, binary(Atan2, x[l], y[l], P::TYPE, m)),
     }
 }
 
@@ -1274,6 +1315,20 @@ impl<'a> Compiler<'a> {
                     dst,
                     lhs: lhs.register,
                     rhs: rhs.register,
+                })
+            }
+            ScalarExpr::Fma { lhs, rhs, addend } => {
+                let lhs = self.expr(lhs);
+                let rhs = self.expr(rhs);
+                let addend = self.expr(addend);
+                self.release(lhs);
+                self.release(rhs);
+                self.release(addend);
+                self.temporary(|dst| Instr::Fma {
+                    dst,
+                    lhs: lhs.register,
+                    rhs: rhs.register,
+                    addend: addend.register,
                 })
             }
             ScalarExpr::Select {

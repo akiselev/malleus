@@ -3,9 +3,10 @@
 use std::error::Error;
 use std::fmt;
 
+use crate::policy::{binary, fma, unary};
 use crate::{
     AccessMode, BinaryOp, CompareOp, Executable, IndexExpr, OperandId, Predicate, ReductionOp,
-    ReductionOrder, ScalarExpr, ScalarType, Statement, UnaryOp,
+    ReductionOrder, ScalarExpr, ScalarType, Statement,
 };
 
 pub struct BufferBinding<'a> {
@@ -147,6 +148,7 @@ fn execute_point(
                             binding.values[offset],
                             value,
                             kernel.numeric_policy.scalar_type,
+                            kernel.numeric_policy.level.math(),
                         )
                     }
                     AccessMode::Reduce(ReductionOp::Multiply) => {
@@ -155,6 +157,7 @@ fn execute_point(
                             binding.values[offset],
                             value,
                             kernel.numeric_policy.scalar_type,
+                            kernel.numeric_policy.level.math(),
                         )
                     }
                     AccessMode::Reduce(ReductionOp::Min) => {
@@ -163,6 +166,7 @@ fn execute_point(
                             binding.values[offset],
                             value,
                             kernel.numeric_policy.scalar_type,
+                            kernel.numeric_policy.level.math(),
                         )
                     }
                     AccessMode::Reduce(ReductionOp::Max) => {
@@ -171,6 +175,7 @@ fn execute_point(
                             binding.values[offset],
                             value,
                             kernel.numeric_policy.scalar_type,
+                            kernel.numeric_policy.level.math(),
                         )
                     }
                     AccessMode::Read => unreachable!("validated store"),
@@ -228,11 +233,19 @@ fn eval(
             *op,
             eval(arg, executable, bindings, coordinates, locals)?,
             kernel.numeric_policy.scalar_type,
+            kernel.numeric_policy.level.math(),
         ),
         ScalarExpr::Binary { op, lhs, rhs } => binary(
             *op,
             eval(lhs, executable, bindings, coordinates, locals)?,
             eval(rhs, executable, bindings, coordinates, locals)?,
+            kernel.numeric_policy.scalar_type,
+            kernel.numeric_policy.level.math(),
+        ),
+        ScalarExpr::Fma { lhs, rhs, addend } => fma(
+            eval(lhs, executable, bindings, coordinates, locals)?,
+            eval(rhs, executable, bindings, coordinates, locals)?,
+            eval(addend, executable, bindings, coordinates, locals)?,
             kernel.numeric_policy.scalar_type,
         ),
         ScalarExpr::Select {
@@ -302,67 +315,6 @@ fn offset(
         stride = stride.checked_mul(shape[*dimension])?;
     }
     Some(offset)
-}
-
-pub(crate) fn unary(op: UnaryOp, value: f64, scalar_type: ScalarType) -> f64 {
-    match scalar_type {
-        ScalarType::F64 => match op {
-            UnaryOp::Neg => -value,
-            UnaryOp::Abs => value.abs(),
-            UnaryOp::Sqrt => value.sqrt(),
-            UnaryOp::Exp => value.exp(),
-            UnaryOp::Ln => value.ln(),
-            UnaryOp::Sin => value.sin(),
-            UnaryOp::Cos => value.cos(),
-            UnaryOp::Tan => value.tan(),
-            UnaryOp::Floor => value.floor(),
-            UnaryOp::Ceil => value.ceil(),
-        },
-        ScalarType::F32 => {
-            let value = value as f32;
-            (match op {
-                UnaryOp::Neg => -value,
-                UnaryOp::Abs => value.abs(),
-                UnaryOp::Sqrt => value.sqrt(),
-                UnaryOp::Exp => value.exp(),
-                UnaryOp::Ln => value.ln(),
-                UnaryOp::Sin => value.sin(),
-                UnaryOp::Cos => value.cos(),
-                UnaryOp::Tan => value.tan(),
-                UnaryOp::Floor => value.floor(),
-                UnaryOp::Ceil => value.ceil(),
-            }) as f64
-        }
-    }
-}
-
-pub(crate) fn binary(op: BinaryOp, lhs: f64, rhs: f64, scalar_type: ScalarType) -> f64 {
-    match scalar_type {
-        ScalarType::F64 => match op {
-            BinaryOp::Add => lhs + rhs,
-            BinaryOp::Sub => lhs - rhs,
-            BinaryOp::Mul => lhs * rhs,
-            BinaryOp::Div => lhs / rhs,
-            BinaryOp::Pow => lhs.powf(rhs),
-            BinaryOp::Min => lhs.min(rhs),
-            BinaryOp::Max => lhs.max(rhs),
-            BinaryOp::Atan2 => lhs.atan2(rhs),
-        },
-        ScalarType::F32 => {
-            let lhs = lhs as f32;
-            let rhs = rhs as f32;
-            (match op {
-                BinaryOp::Add => lhs + rhs,
-                BinaryOp::Sub => lhs - rhs,
-                BinaryOp::Mul => lhs * rhs,
-                BinaryOp::Div => lhs / rhs,
-                BinaryOp::Pow => lhs.powf(rhs),
-                BinaryOp::Min => lhs.min(rhs),
-                BinaryOp::Max => lhs.max(rhs),
-                BinaryOp::Atan2 => lhs.atan2(rhs),
-            }) as f64
-        }
-    }
 }
 
 pub(crate) fn cast(value: f64, scalar_type: ScalarType) -> f64 {

@@ -281,7 +281,7 @@ fn fixture_eval(
                 BinaryOp::Atan2 => lhs.atan2(rhs),
             }
         }
-        ScalarExpr::Unary { .. } | ScalarExpr::Select { .. } => {
+        ScalarExpr::Unary { .. } | ScalarExpr::Select { .. } | ScalarExpr::Fma { .. } => {
             return Err("fixture runner does not support this expression".into());
         }
     })

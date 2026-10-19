@@ -330,6 +330,11 @@ fn expand_locals(expr: &ScalarExpr, locals: &BTreeMap<LocalId, ScalarExpr>) -> S
         ScalarExpr::Binary { op, lhs, rhs } => {
             ScalarExpr::binary(*op, expand_locals(lhs, locals), expand_locals(rhs, locals))
         }
+        ScalarExpr::Fma { lhs, rhs, addend } => ScalarExpr::fma(
+            expand_locals(lhs, locals),
+            expand_locals(rhs, locals),
+            expand_locals(addend, locals),
+        ),
         ScalarExpr::Select {
             condition,
             if_true,
@@ -370,6 +375,11 @@ fn remap_expr(expr: &ScalarExpr, operands: &BTreeMap<OperandId, OperandId>) -> S
         ScalarExpr::Binary { op, lhs, rhs } => {
             ScalarExpr::binary(*op, remap_expr(lhs, operands), remap_expr(rhs, operands))
         }
+        ScalarExpr::Fma { lhs, rhs, addend } => ScalarExpr::fma(
+            remap_expr(lhs, operands),
+            remap_expr(rhs, operands),
+            remap_expr(addend, operands),
+        ),
         ScalarExpr::Select {
             condition,
             if_true,
@@ -558,6 +568,22 @@ fn derivative(
                 ),
             }
         }
+        // d(a * b + c) = da * b + a * db + dc, in strict (unfused) operations.
+        ScalarExpr::Fma { lhs, rhs, addend } => {
+            let dl = simplify(d(lhs, load_derivative));
+            let dr = simplify(d(rhs, load_derivative));
+            let dc = simplify(d(addend, load_derivative));
+            // Shaped like the derivative of the unfused `Add(Mul(a, b), c)`.
+            ScalarExpr::binary(
+                BinaryOp::Add,
+                simplify(ScalarExpr::binary(
+                    BinaryOp::Add,
+                    ScalarExpr::binary(BinaryOp::Mul, dl, (**rhs).clone()),
+                    ScalarExpr::binary(BinaryOp::Mul, (**lhs).clone(), dr),
+                )),
+                dc,
+            )
+        }
         ScalarExpr::Select {
             condition,
             if_true,
@@ -593,6 +619,9 @@ fn simplify(expr: ScalarExpr) -> ScalarExpr {
                 (BinaryOp::Div, _, ScalarExpr::Constant(1.0)) => lhs,
                 _ => ScalarExpr::binary(op, lhs, rhs),
             }
+        }
+        ScalarExpr::Fma { lhs, rhs, addend } => {
+            ScalarExpr::fma(simplify(*lhs), simplify(*rhs), simplify(*addend))
         }
         ScalarExpr::Select {
             condition,

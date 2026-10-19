@@ -267,6 +267,11 @@ pub fn same_bits(a: f64, b: f64) -> bool {
 
 /// Compile `source` (which must define `fn main`) with `rustc -O`, run it, return stdout.
 pub fn rustc_run(tag: &str, source: &str) -> String {
+    rustc_run_with(tag, source, &[])
+}
+
+/// `rustc_run` with extra rustc arguments (for example `--extern`).
+pub fn rustc_run_with(tag: &str, source: &str, extra: &[std::ffi::OsString]) -> String {
     let dir = std::env::temp_dir().join(format!("malleus-{tag}-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("kernels.rs"), source).unwrap();
@@ -274,6 +279,7 @@ pub fn rustc_run(tag: &str, source: &str) -> String {
     let compiled = Command::new(rustc)
         .arg("--edition=2024")
         .arg("-O")
+        .args(extra)
         .arg(dir.join("kernels.rs"))
         .arg("-o")
         .arg(dir.join("kernels"))
@@ -289,4 +295,29 @@ pub fn rustc_run(tag: &str, source: &str) -> String {
     let stdout = String::from_utf8(run.stdout).unwrap();
     fs::remove_dir_all(dir).unwrap();
     stdout
+}
+
+/// rustc arguments linking emitted `StrictPortable` source against the `libm` rlib this test
+/// binary was built with (the exact `malleus::policy::PORTABLE_MATH` pin).
+pub fn libm_extern_args() -> Vec<std::ffi::OsString> {
+    let deps = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let rlib = fs::read_dir(&deps)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            let name = p.file_name().unwrap().to_string_lossy();
+            name.starts_with("liblibm-") && name.ends_with(".rlib")
+        })
+        .max_by_key(|p| fs::metadata(p).and_then(|m| m.modified()).ok())
+        .expect("libm rlib next to the test binary");
+    let mut extern_arg = std::ffi::OsString::from("libm=");
+    extern_arg.push(rlib);
+    let mut dependency = std::ffi::OsString::from("dependency=");
+    dependency.push(deps);
+    vec!["--extern".into(), extern_arg, "-L".into(), dependency]
 }

@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::policy::NumericLevel;
+
 /// An iteration-axis identifier local to one kernel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -295,6 +297,10 @@ pub struct NumericPolicy {
     pub fma: FmaPolicy,
     pub reassociation: Reassociation,
     pub reduction_order: ReductionOrder,
+    /// Numeric semantics level (`malleus::policy`). The default `StrictHost` is not
+    /// serialized, so policies that predate levels keep their bytes and digests.
+    #[serde(default, skip_serializing_if = "NumericLevel::is_strict_host")]
+    pub level: NumericLevel,
 }
 
 impl Default for NumericPolicy {
@@ -304,6 +310,7 @@ impl Default for NumericPolicy {
             fma: FmaPolicy::Forbidden,
             reassociation: Reassociation::Forbidden,
             reduction_order: ReductionOrder::Canonical,
+            level: NumericLevel::StrictHost,
         }
     }
 }
@@ -369,6 +376,13 @@ pub enum ScalarExpr {
         if_true: Box<Self>,
         if_false: Box<Self>,
     },
+    /// Explicit fused multiply-add `lhs * rhs + addend` with a single IEEE rounding. Backends
+    /// never form it on their own; see `malleus::policy`.
+    Fma {
+        lhs: Box<Self>,
+        rhs: Box<Self>,
+        addend: Box<Self>,
+    },
 }
 
 impl ScalarExpr {
@@ -384,6 +398,14 @@ impl ScalarExpr {
             op,
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
+        }
+    }
+
+    pub fn fma(lhs: Self, rhs: Self, addend: Self) -> Self {
+        Self::Fma {
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            addend: Box::new(addend),
         }
     }
 }

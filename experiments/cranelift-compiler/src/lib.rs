@@ -515,6 +515,7 @@ impl Lower<'_, '_> {
                     _ => return Err(unsupported(op)),
                 }
             }
+            ScalarExpr::Fma { .. } => return Err(unsupported("fma")),
             ScalarExpr::Select {
                 condition,
                 if_true,

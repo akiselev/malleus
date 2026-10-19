@@ -23,6 +23,7 @@ mod facet;
 mod interpreter;
 pub mod interval;
 mod ir;
+pub mod policy;
 pub mod prepared;
 mod rust;
 mod validate;

@@ -3,7 +3,7 @@ use malleus::*;
 use std::fmt::Write;
 
 mod support;
-use support::{fixtures, rustc_run};
+use support::{fixtures, libm_extern_args, rustc_run, rustc_run_with};
 
 #[test]
 fn compiled_rust_matches_interpreter_primal_ad_policies_and_ieee_inputs() {
@@ -183,4 +183,177 @@ fn source_refuses_injection_and_unsupported_schedule() {
         width: 2,
     });
     assert!(lower_rust(&Executable::new(v, s).unwrap(), "kernel").is_err());
+}
+
+/// Emits every case as `kernel_<i>`, calls it on its buffers and prints all buffers' bits.
+fn emitted_program(cases: &[(Executable, Vec<Vec<f64>>)]) -> String {
+    let mut code = String::new();
+    let mut main = String::from("fn main() {\n");
+    for (case, (e, inputs)) in cases.iter().enumerate() {
+        let name = format!("kernel_{case}");
+        code.push_str(&lower_rust(e, &name).unwrap());
+        main.push_str("{\n");
+        for (i, b) in inputs.iter().enumerate() {
+            let values: Vec<_> = b
+                .iter()
+                .map(|x| format!("f64::from_bits({}u64)", x.to_bits()))
+                .collect();
+            writeln!(main, "let mut b{i}=vec![{}];", values.join(",")).unwrap();
+        }
+        write!(main, "{name}(").unwrap();
+        for (i, o) in e.kernel().as_kernel().operands.iter().enumerate() {
+            let m = if o.access == AccessMode::Read {
+                ""
+            } else {
+                "mut "
+            };
+            write!(main, "&{m}b{i},").unwrap();
+        }
+        main.push_str(").unwrap();\n");
+        let printed: Vec<_> = (0..inputs.len())
+            .map(|i| format!("b{i}.iter().map(|x|x.to_bits()).collect::<Vec<_>>()"))
+            .collect();
+        writeln!(
+            main,
+            "println!(\"{{:?}}\",vec![{}]);\n}}",
+            printed.join(",")
+        )
+        .unwrap();
+    }
+    main.push_str("}\n");
+    code + &main
+}
+
+fn assert_bitwise(stdout: &str, cases: &[(Executable, Vec<Vec<f64>>)]) {
+    assert_eq!(stdout.lines().count(), cases.len());
+    for (line, (e, inputs)) in stdout.lines().zip(cases) {
+        let mut buffers = inputs.clone();
+        let mut bindings: Vec<_> = buffers
+            .iter_mut()
+            .enumerate()
+            .map(|(i, v)| BufferBinding::new(OperandId::new(i), v))
+            .collect();
+        Interpreter::run(e, &mut bindings).unwrap();
+        drop(bindings);
+        let output: Vec<Vec<u64>> = serde_json::from_str(line).unwrap();
+        for (actual, want) in output.iter().flatten().zip(buffers.iter().flatten()) {
+            assert!(
+                *actual == want.to_bits() || (f64::from_bits(*actual).is_nan() && want.is_nan()),
+                "{}: {actual:x} != {want:?}",
+                e.kernel().as_kernel().name
+            );
+        }
+    }
+}
+
+#[test]
+fn compiled_portable_math_and_explicit_fma_match_interpreter() {
+    let specials = [
+        0.0,
+        -0.0,
+        0.5,
+        -2.5,
+        1.0,
+        3.0,
+        1e-310,
+        700.0,
+        -745.5,
+        1e300,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NAN,
+        1e22,
+        -0.75,
+    ];
+    let n = specials.len() * specials.len();
+    let axis = AxisId::new(0);
+    let point = |name: String, body: ScalarExpr, ty: ScalarType, level| {
+        let policy = NumericPolicy {
+            scalar_type: ty,
+            level,
+            ..NumericPolicy::default()
+        };
+        StructuredKernel {
+            name,
+            iteration_domain: IterationDomain::new(vec![n]),
+            iterators: vec![IteratorKind::Parallel],
+            operands: vec![
+                KernelOperand::tensor("x", vec![n], AccessMode::Read),
+                KernelOperand::tensor("y", vec![n], AccessMode::Read),
+                KernelOperand::tensor("z", vec![n], AccessMode::Read),
+                KernelOperand::tensor("out", vec![n], AccessMode::Write),
+            ],
+            indexing_maps: (0..4)
+                .map(|i| IndexingMap::new(OperandId::new(i), vec![IndexExpr::axis(axis)]))
+                .collect(),
+            body: KernelRegion {
+                statements: vec![Statement::Store {
+                    operand: OperandId::new(3),
+                    value: body,
+                }],
+            },
+            numeric_policy: policy,
+        }
+    };
+    let x: Vec<f64> = specials.iter().flat_map(|&a| specials.map(|_| a)).collect();
+    let y: Vec<f64> = specials.iter().flat_map(|_| specials).collect();
+    let z: Vec<f64> = (0..n).map(|i| specials[(i * 7) % specials.len()]).collect();
+    let l = |i| ScalarExpr::Load(OperandId::new(i));
+    let mut cases = vec![];
+    use malleus::policy::NumericLevel::{StrictHost, StrictPortable};
+    for ty in [ScalarType::F32, ScalarType::F64] {
+        let mut bodies = vec![];
+        for op in [
+            UnaryOp::Exp,
+            UnaryOp::Ln,
+            UnaryOp::Sin,
+            UnaryOp::Cos,
+            UnaryOp::Tan,
+        ] {
+            bodies.push((format!("{op:?}"), ScalarExpr::unary(op, l(0))));
+        }
+        for op in [BinaryOp::Pow, BinaryOp::Atan2, BinaryOp::Min, BinaryOp::Max] {
+            bodies.push((format!("{op:?}"), ScalarExpr::binary(op, l(0), l(1))));
+        }
+        bodies.push(("fma".into(), ScalarExpr::fma(l(0), l(1), l(2))));
+        for (name, body) in bodies {
+            for level in [StrictPortable, StrictHost] {
+                let k = point(format!("{name}-{ty:?}-{level:?}"), body.clone(), ty, level);
+                let buffers = vec![x.clone(), y.clone(), z.clone(), vec![0.0; n]];
+                cases.push((Executable::reference(validate(k).unwrap()), buffers));
+            }
+        }
+        // Portable min/max reductions.
+        for op in [ReductionOp::Min, ReductionOp::Max] {
+            let mut k = fixtures::quadratic(8);
+            k.numeric_policy.scalar_type = ty;
+            k.numeric_policy.level = StrictPortable;
+            k.operands[2].access = AccessMode::Reduce(op);
+            let b = fixtures::buffers(&k);
+            cases.push((Executable::reference(validate(k).unwrap()), b));
+        }
+    }
+    // The adversarial fma case: 1 - 2^-60 is not representable, so only a fused result is nonzero.
+    let e = 2f64.powi(-30);
+    let k = point(
+        "fma-adversarial".into(),
+        ScalarExpr::fma(l(0), l(1), l(2)),
+        ScalarType::F64,
+        StrictHost,
+    );
+    let mut adversarial = vec![
+        vec![1.0 + e; n],
+        vec![1.0 - e; n],
+        vec![-1.0; n],
+        vec![0.0; n],
+    ];
+    adversarial[0][1] = 2.0;
+    cases.push((Executable::reference(validate(k).unwrap()), adversarial));
+    let source = emitted_program(&cases);
+    assert!(source.contains("::libm::expf(") && source.contains("::libm::atan2("));
+    assert!(source.contains(".mul_add("));
+    let stdout = rustc_run_with("rust-portable", &source, &libm_extern_args());
+    assert_bitwise(&stdout, &cases);
+    let last: Vec<Vec<u64>> = serde_json::from_str(stdout.lines().last().unwrap()).unwrap();
+    assert_eq!(f64::from_bits(last[3][0]), -(e * e));
 }

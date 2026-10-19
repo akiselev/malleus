@@ -22,6 +22,12 @@ impl Error for LoweringError {}
 /// the reference f64 storage ABI. Length checks precede all effects. The function
 /// returns `Result<(), &'static str>` and needs no Malleus runtime dependency.
 /// Compile with normal Rust FP semantics, never fast-math/reassociation overrides.
+///
+/// Explicit `Fma` nodes become `mul_add`; nothing else is ever fused. A kernel at level
+/// `StrictPortable` calls `::libm::{exp, log, sin, cos, tan, pow, atan2, fmin, fmax}` (and
+/// their `f` variants for f32), so the crate compiling its source must depend on exactly the
+/// [`policy::PORTABLE_MATH`] pin (`libm = { version = "=0.2.16", default-features = false }`).
+/// Kernels at the other levels remain dependency-free.
 pub fn lower_rust(e: &Executable, name: &str) -> Result<String, LoweringError> {
     lower_rust_impl(e, name, None)
 }
@@ -157,8 +163,8 @@ fn lower_rust_impl(
                     value = match op {
                         ReductionOp::Add => format!("({old}+{value})"),
                         ReductionOp::Multiply => format!("({old}*{value})"),
-                        ReductionOp::Min => format!("{old}.min({value})"),
-                        ReductionOp::Max => format!("{old}.max({value})"),
+                        ReductionOp::Min => emit.call2(BinaryOp::Min, &old, &value),
+                        ReductionOp::Max => emit.call2(BinaryOp::Max, &old, &value),
                     };
                 }
                 writeln!(body, "b{i}[{address}] = ({value}) as f64;").expect("string write");
@@ -229,6 +235,32 @@ impl Emitter<'_> {
             "f64"
         }
     }
+    fn portable(&self) -> bool {
+        self.k.numeric_policy.level.math() == policy::MathLibrary::Portable
+    }
+    fn libm_suffix(&self) -> &'static str {
+        if self.ty() == "f32" { "f" } else { "" }
+    }
+    /// `pow`, `min`, `max` or `atan2` of two emitted operands under the kernel's math library.
+    fn call2(&self, op: BinaryOp, a: &str, b: &str) -> String {
+        if self.portable() {
+            let name = match op {
+                BinaryOp::Pow => "pow",
+                BinaryOp::Min => "fmin",
+                BinaryOp::Max => "fmax",
+                _ => "atan2",
+            };
+            format!("::libm::{name}{}({a}, {b})", self.libm_suffix())
+        } else {
+            let name = match op {
+                BinaryOp::Pow => "powf",
+                BinaryOp::Min => "min",
+                BinaryOp::Max => "max",
+                _ => "atan2",
+            };
+            format!("({a}).{name}({b})")
+        }
+    }
     fn address(&self, id: OperandId) -> Result<String, LoweringError> {
         let o = &self.k.operands[id.index()];
         let map = self
@@ -295,6 +327,17 @@ impl Emitter<'_> {
                 let a = self.expr(arg, d + 1)?;
                 match op {
                     UnaryOp::Neg => format!("(-({a}))"),
+                    op if self.portable() && policy::unary_uses_math(*op) => format!(
+                        "::libm::{}{}({a})",
+                        match op {
+                            UnaryOp::Exp => "exp",
+                            UnaryOp::Ln => "log",
+                            UnaryOp::Sin => "sin",
+                            UnaryOp::Cos => "cos",
+                            _ => "tan",
+                        },
+                        self.libm_suffix()
+                    ),
                     other => format!(
                         "({a}).{}()",
                         match other {
@@ -325,18 +368,15 @@ impl Emitter<'_> {
                             _ => "/",
                         }
                     ),
-                    other => format!(
-                        "({a}).{}({b})",
-                        match other {
-                            BinaryOp::Pow => "powf",
-                            BinaryOp::Min => "min",
-                            BinaryOp::Max => "max",
-                            BinaryOp::Atan2 => "atan2",
-                            _ => unreachable!(),
-                        }
-                    ),
+                    other => self.call2(*other, &a, &b),
                 }
             }
+            ScalarExpr::Fma { lhs, rhs, addend } => format!(
+                "({}).mul_add({}, {})",
+                self.expr(lhs, d + 1)?,
+                self.expr(rhs, d + 1)?,
+                self.expr(addend, d + 1)?
+            ),
             ScalarExpr::Select {
                 condition,
                 if_true,

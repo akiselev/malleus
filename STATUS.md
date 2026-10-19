@@ -2,8 +2,32 @@
 
 Updated: 2026-10-18
 Branch: `master`
-Milestone: W11 M1 prepared kernels and batched execution (`EXECUTION.md`); strict Rust
+Milestone: W11 M2 numeric policy levels, explicit `Fma`, portable transcendentals; W11 M1
+prepared kernels and batched execution (`EXECUTION.md`); strict Rust
 source/unrolled and core interval lowering; W8/W7/SV0-B2 contracts retained
+
+## Numeric policy levels (W11 M2, module `malleus::policy`)
+
+- `NumericPolicy::level: policy::NumericLevel { StrictPortable (L0), StrictHost (L1, default),
+  Contracted (L2) }`, `serde(default, skip_serializing_if = is_strict_host)`: existing kernels
+  keep bytes and digests (`tests/digest_pins.rs` pins from base `7bb4ccd`; `tests/policy.rs`
+  pins the policy JSON). L3 fixed-tree reductions: not implemented (open).
+- L0 evaluates exp/ln/sin/cos/tan/pow/atan2/min/max (and min/max reductions) with the pure-Rust
+  `libm` crate pinned `=0.2.16`, `default-features = false` (MIT/Apache; no deps; same code
+  path on every host; `policy::PORTABLE_MATH`). L1 keeps host `std`. sqrt/abs/floor/ceil/fma
+  are IEEE-exact and shared. Measured L0 vs L1 (glibc, this host): max 1 ulp for every op in
+  f64 and f32 on 4,000 samples each incl. specials; asserted bound 2 ulp.
+- Explicit `ScalarExpr::Fma { lhs, rhs, addend }` (new variant, existing encodings unchanged),
+  single rounding (`mul_add`) in interpreter, prepared point/columnar, Rust emitter; AD rule
+  `da*b + a*db + dc` (strict, shaped like the unfused derivative); admitted at every level.
+- `policy::contract_fma(&kernel) -> Contraction { kernel, sites }`: fixed sites
+  `Add(Mul(a,b),c)`/`Add(c,Mul(a,b))` -> `Fma(a,b,c)`, `Sub(Mul(a,b),c)` -> `Fma(a,b,-c)`,
+  `Sub(c,Mul(a,b))` -> `Fma(-a,b,c)`; not through locals or reducing stores; L1 input only,
+  output level `Contracted`. Refusals `ContractionError { Level, ImprecisePolicy, Invalid }`.
+- Vague `FmaPolicy::Allowed`/`Reassociation::Allowed`: no backend acts on them (strict
+  execution); accepted at L1 for identity, refused at L0/L2 by
+  `ValidationError::ImpreciseNumericPolicy` (new variant) and by `contract_fma`.
+- New root-level names: only the module `policy`.
 
 ## Local backends
 

@@ -71,6 +71,11 @@ fn reads(expr: &ScalarExpr, operands: &[bool], locals: &[bool]) -> bool {
         ScalarExpr::Binary { lhs, rhs, .. } => {
             reads(lhs, operands, locals) || reads(rhs, operands, locals)
         }
+        ScalarExpr::Fma { lhs, rhs, addend } => {
+            reads(lhs, operands, locals)
+                || reads(rhs, operands, locals)
+                || reads(addend, operands, locals)
+        }
         ScalarExpr::Select {
             condition,
             if_true,

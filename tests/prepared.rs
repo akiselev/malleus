@@ -92,7 +92,12 @@ impl Gen<'_> {
                 }
             };
         }
-        match self.r.below(5) {
+        match self.r.below(6) {
+            5 => ScalarExpr::fma(
+                self.expr(depth - 1),
+                self.expr(depth - 1),
+                self.expr(depth - 1),
+            ),
             0 => {
                 use UnaryOp::*;
                 let ops = [Neg, Abs, Sqrt, Exp, Ln, Sin, Cos, Tan, Floor, Ceil];
@@ -133,7 +138,8 @@ impl Gen<'_> {
     }
 }
 
-/// A random kernel over every expression form, all access modes, affine reversed/constant
+/// A random kernel over every expression form (including explicit `Fma`), L0 and L1 math,
+/// all access modes, affine reversed/constant
 /// maps, column-major layout, nonzero regions, f32/f64 and schedule-defined loop orders.
 fn random_executable(r: &mut Rng) -> Executable {
     use AccessMode::*;
@@ -264,6 +270,9 @@ fn random_executable(r: &mut Rng) -> Executable {
     let mut policy = NumericPolicy::default();
     if g.r.below(2) == 0 {
         policy.scalar_type = ScalarType::F32;
+    }
+    if g.r.below(3) == 0 {
+        policy.level = malleus::policy::NumericLevel::StrictPortable;
     }
     let schedule_defined = rank == 2 && g.r.below(2) == 0;
     if schedule_defined {
