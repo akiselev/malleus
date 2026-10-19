@@ -2,10 +2,21 @@
 
 Updated: 2026-10-18
 Branch: `master`
-Milestone: strict Rust source/unrolled lowering and core interval lowering;
-W8 input-read proofs, W7 composition/facet contracts and SV0-B2 campaigns retained
+Milestone: W11 M1 prepared kernels and batched execution (`EXECUTION.md`); strict Rust
+source/unrolled and core interval lowering; W8/W7/SV0-B2 contracts retained
 
 ## Local backends
+
+- Core `PreparedKernel` (W11 M1): an `Executable` compiled once into register bytecode
+  (lazy point program + eager columnar program), affine addresses folded and proven in
+  range at preparation, positional `ReadBinding`/`WriteBinding` calls with zero heap
+  allocation on a sized `PreparedState`, Interpreter-compatible checked `run`, and
+  `run_batch` (per-binding batch stride, contract = n sequential calls; columnar in
+  `BATCH_BLOCK = 32` lanes when written windows are disjoint, sequential otherwise).
+  `PreparedModule`, `PreparedComposition` (+ `CompositionState`, interpreter copy
+  semantics, no per-call allocation) and the campaign `PreparedRunner`. Bitwise equal to
+  the interpreter on every fixture family and 400 random kernels. No new dependency, no IR
+  or digest change (pinned in `tests/digest_pins.rs`). See `EXECUTION.md`.
 
 - Core `lower_rust` emits standalone safe Rust over checked operand-order slices,
   f32/f64 operation precision, affine layouts/regions, predicates, ordered effects
@@ -111,11 +122,13 @@ external operand, and composition binds buffers between verbatim kernels.
 
 ## Validation
 
-Core checks rerun successfully on 2026-10-18:
+Core checks rerun successfully on 2026-10-18 (W11 M1 clone):
 
-- `cargo test --locked --workspace --all-targets`: 39 tests passed (1 unit; composition 9;
-  facet_pair 6; output_dependency 6; structured_kernel 11; sv0_campaign 6).
-- `cargo clippy --locked --all-targets --all-features -- -D warnings`
+- `cargo test -p malleus --locked` (opt-level 2): 53 tests passed (1 unit; composition 9;
+  digest_pins 1; facet_pair 6; interval_differential 1; interval_soundness 3;
+  output_dependency 6; prepared 5; prepared_alloc 1; rust_source 2; structured_kernel 11;
+  sv0_campaign 7).
+- `cargo clippy -p malleus --all-targets -- -D warnings`
 - `RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps`
 - `cargo fmt --package malleus -- --check`; `git diff --check`
 - Focused `output_dependency` 6/6: unused/dead/overwritten data, local/operand transitivity,
@@ -134,6 +147,28 @@ Proof tests for the W7 packages: `two_kernel_composition_evaluates_equal_to_the_
 `jvp_and_vjp_of_the_facet_pair_satisfy_the_adjoint_identity_and_keep_roles`,
 `kernel_and_module_digests_are_deterministic_and_pinned`.
 
+## Prepared execution measurements (W11 M1)
+
+`cargo run --release --example prepared_bench`, 2026-10-18, Intel i7-8850H (12 threads)
+**under heavy contention (load average 64-76)**: absolute numbers are inflated several-fold
+and noisy; ratios are indicative only. Median of seven batches, ~20 ms each, time per call;
+"batched" = one `run_batch` over 64 strided independent points (10^5 for the property
+kernel), per point. All four paths are compared bitwise before timing.
+
+| Kernel | Interpreter | Prepared one-shot | Prepared reusable | Batched (per point) |
+|---|---:|---:|---:|---:|
+| One guard polynomial | 1.14 us | 1.04 us | 222.9 ns | 55.6 ns |
+| 64 guard evaluations | 36.13 us | 19.50 us | 10.10 us | 1.70 us |
+| 4,096 guard evaluations | 2.32 ms | 1.25 ms | 1.11 ms | 184.01 us |
+| Quadratic JVP, 1,024 inputs | 1.51 ms | 176.60 us | 376.86 us | 37.84 us |
+| Quadratic VJP, 1,024 inputs | 515.68 us | 149.08 us | 264.47 us | 99.11 us |
+| Dense matvec 64x64 | 1.65 ms | 404.26 us | 1.06 ms | 216.30 us |
+| Property kernel, 10^5 point calls | 1.50 us | 1.86 us | 614.0 ns | 74.3 ns |
+
+The Cranelift table in `experiments/cranelift-compiler/README.md` was measured on a
+different, idle host (EPYC 9V74); do not compare across the two tables. Rerun on an idle
+host before quoting speedups.
+
 ## Contract shapes landed (for GX-CONTRACTS C12)
 
 - `malleus::Digest { algorithm: "blake3", hex }`; schemas `malleus-kernel-digest/1`,
@@ -146,6 +181,12 @@ Proof tests for the W7 packages: `two_kernel_composition_evaluates_equal_to_the_
 - `FacetPairKernel`, `FacetOperandRole`, `FacetSide`, `SwapParity`, `FACET_NORMAL_CONVENTION`,
   `FacetPairDerivativeProduct`, `FacetSwapReport`, `FacetPairError`, `FacetSwapError`.
 - `DerivativeProduct::primal_operands` (additive).
+- W11 M1 (additive, no serialized form): `PreparedKernel { new, run, call, run_batch,
+  read_operands, write_operands, required_len, state }`, `PreparedState`, `ReadBinding` /
+  `WriteBinding { operand, values, stride }`, `BATCH_BLOCK = 32`, `CallError { ReadCount,
+  WriteCount, ReadOperand, WriteOperand, ShortBuffer, ExtentOverflow }`, `PrepareError {
+  AddressOutOfRange, ProgramTooLarge }`, `PreparedModule`, `PreparedComposition`,
+  `CompositionState`, `PreparedRunner` (identity `malleus-prepared/bytecode-v1`).
 
 ## Deviations from `sinbad/ARCHITECTURE.md` and why
 
@@ -176,6 +217,12 @@ Proof tests for the W7 packages: `two_kernel_composition_evaluates_equal_to_the_
   the minus-to-plus normal (SV2-B2 pull-forward).
 
 ## Current limits and next work
+
+- Prepared execution (W11 M1): compositions have no batch entry point; `PreparedComposition`
+  copies stage operand windows in and out like the interpreter (aliasing them is a future
+  optimization that must keep the copy semantics observable-equal). The point program
+  recomputes each affine address per access (no strength reduction yet). Measurements above
+  were taken on a contended host.
 
 - Request operands of a composition derivative must be exposed (unshared); tangents of an
   intermediate shared output are not exposed (a caller can still observe its primal value by

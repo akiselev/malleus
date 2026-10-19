@@ -304,7 +304,7 @@ fn offset(
     Some(offset)
 }
 
-fn unary(op: UnaryOp, value: f64, scalar_type: ScalarType) -> f64 {
+pub(crate) fn unary(op: UnaryOp, value: f64, scalar_type: ScalarType) -> f64 {
     match scalar_type {
         ScalarType::F64 => match op {
             UnaryOp::Neg => -value,
@@ -336,7 +336,7 @@ fn unary(op: UnaryOp, value: f64, scalar_type: ScalarType) -> f64 {
     }
 }
 
-fn binary(op: BinaryOp, lhs: f64, rhs: f64, scalar_type: ScalarType) -> f64 {
+pub(crate) fn binary(op: BinaryOp, lhs: f64, rhs: f64, scalar_type: ScalarType) -> f64 {
     match scalar_type {
         ScalarType::F64 => match op {
             BinaryOp::Add => lhs + rhs,
@@ -365,14 +365,14 @@ fn binary(op: BinaryOp, lhs: f64, rhs: f64, scalar_type: ScalarType) -> f64 {
     }
 }
 
-fn cast(value: f64, scalar_type: ScalarType) -> f64 {
+pub(crate) fn cast(value: f64, scalar_type: ScalarType) -> f64 {
     match scalar_type {
         ScalarType::F32 => (value as f32) as f64,
         ScalarType::F64 => value,
     }
 }
 
-fn compare(op: CompareOp, lhs: f64, rhs: f64) -> bool {
+pub(crate) fn compare(op: CompareOp, lhs: f64, rhs: f64) -> bool {
     match op {
         CompareOp::Eq => lhs == rhs,
         CompareOp::NotEq => lhs != rhs,

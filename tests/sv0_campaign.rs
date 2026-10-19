@@ -2,8 +2,9 @@ use malleus::{
     AccessMode, AxisId, BinaryOp, CampaignError, ComparisonTolerance, Executable, IndexExpr,
     IndexingMap, IterationDomain, IteratorKind, KernelOperand, KernelRegion, LocalCheckKind,
     LocalDifferentialCase, LocalExecutableRunner, NumericPolicy, NumericPolicyMutation, OperandId,
-    OperandValues, ReductionOp, ScalarExpr, ScalarType, Statement, StructuredKernel,
-    StructuredModule, check_numeric_policy_mutation, run_local_differential_campaign,
+    OperandValues, PreparedKernel, PreparedRunner, PreparedState, ReadBinding, ReductionOp,
+    ScalarExpr, ScalarType, Statement, StructuredKernel, StructuredModule, WriteBinding,
+    check_numeric_policy_mutation, run_local_differential_campaign,
 };
 
 fn quadratic_module() -> StructuredModule {
@@ -521,4 +522,70 @@ fn campaign_refuses_reference_self_comparison_and_unversioned_identity() {
     let error = run_local_differential_campaign(&quadratic_module(), &[case()], &UnversionedRunner)
         .unwrap_err();
     assert!(error.to_string().contains("implementation/version"));
+}
+
+/// Runs every campaign kernel as a columnar batch of three identical strided points and
+/// requires all three replicas to agree bitwise before reporting the first.
+struct ReplicatedBatchRunner;
+
+impl LocalExecutableRunner for ReplicatedBatchRunner {
+    fn identity(&self) -> &str {
+        "malleus-prepared-batch-replicas/1"
+    }
+
+    fn run(&self, executable: &Executable, buffers: &mut [Vec<f64>]) -> Result<(), String> {
+        const POINTS: usize = 3;
+        let prepared = PreparedKernel::new(executable).map_err(|error| error.to_string())?;
+        let kernel = executable.kernel().as_kernel();
+        let mut packed: Vec<Vec<f64>> = buffers.iter().map(|b| b.repeat(POINTS)).collect();
+        let (mut reads, mut writes) = (vec![], vec![]);
+        for (index, values) in packed.iter_mut().enumerate() {
+            let (operand, stride) = (OperandId::new(index), buffers[index].len());
+            if kernel.operands[index].access == AccessMode::Read {
+                reads.push(ReadBinding::strided(operand, values, stride));
+            } else {
+                writes.push(WriteBinding::strided(operand, values, stride));
+            }
+        }
+        prepared
+            .run_batch(&mut PreparedState::new(), POINTS, &reads, &mut writes)
+            .map_err(|error| error.to_string())?;
+        drop((reads, writes));
+        for (buffer, packed) in buffers.iter_mut().zip(&packed) {
+            let (first, rest) = packed.split_at(buffer.len());
+            if rest.chunks(buffer.len().max(1)).any(|replica| {
+                replica
+                    .iter()
+                    .zip(first)
+                    .any(|(a, b)| a.to_bits() != b.to_bits())
+            }) {
+                return Err("batch replicas disagree".into());
+            }
+            buffer.copy_from_slice(first);
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn the_seven_check_campaign_runs_through_prepared_and_batched_execution() {
+    for report in [
+        run_local_differential_campaign(&quadratic_module(), &[case()], &PreparedRunner).unwrap(),
+        run_local_differential_campaign(&quadratic_module(), &[case()], &ReplicatedBatchRunner)
+            .unwrap(),
+    ] {
+        assert!(report.passed(), "{report:#?}");
+        assert_eq!(report.checks.len(), 7);
+        for check in &report.checks {
+            if matches!(
+                check.kind,
+                LocalCheckKind::PrimalInterpreterVsExecutable
+                    | LocalCheckKind::JvpInterpreterVsExecutable
+                    | LocalCheckKind::VjpInterpreterVsExecutable
+                    | LocalCheckKind::ParameterJvpInterpreterVsExecutable
+            ) {
+                assert_eq!(check.max_absolute_error, 0.0, "{check:?}");
+            }
+        }
+    }
 }

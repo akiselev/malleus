@@ -23,6 +23,7 @@ mod facet;
 mod interpreter;
 pub mod interval;
 mod ir;
+mod prepared;
 mod rust;
 mod validate;
 
@@ -65,4 +66,8 @@ pub use ir::{
 };
 pub use validate::{ValidatedKernel, ValidatedModule, ValidationError, validate, validate_module};
 
+pub use prepared::{
+    BATCH_BLOCK, CallError, CompositionState, PrepareError, PreparedComposition, PreparedKernel,
+    PreparedModule, PreparedRunner, PreparedState, ReadBinding, WriteBinding,
+};
 pub use rust::{LoweringError, lower_rust, lower_rust_unrolled};
