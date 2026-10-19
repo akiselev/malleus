@@ -765,6 +765,11 @@ fn prepared_compositions_match_the_interpreter_including_derivatives_and_errors(
         .unwrap();
         executables.push(product.composition);
     }
+    let mut single = primal.clone();
+    for stage in &mut single.stages {
+        stage.numeric_policy.scalar_type = ScalarType::F32;
+    }
+    executables.push(single);
     let mut r = Rng(0xc0_4905_1710_0003);
     for composition in executables {
         let e = ExecutableComposition::reference(validate_composition(composition).unwrap());

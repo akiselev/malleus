@@ -56,6 +56,10 @@ system vocabulary. It has no dependencies on the rest of the Sinbad ecosystem.
   exact data, and the caller has checked `interval::ieee_environment_supported()` for the
   thread that runs the kernel (no run-time check is made). See `INTERVALS.md`
   (`experiments/cranelift-compiler/INTERVALS.md`) and `RUST-BACKEND.md`.
+- `PreparedKernel` compiles an `Executable` once into register bytecode with no per-call
+  allocation; `run_batch` executes n points (per-binding batch strides) with the meaning of n
+  sequential calls, columnar where written windows are disjoint. Bitwise equal to the
+  interpreter; `PreparedComposition` does the same for compositions. See `EXECUTION.md`.
 - `DerivativeRequest` selects independent and dependent operands; JVP and VJP
   are implemented as IR-to-IR passes, while materialized Jacobians are an
   explicit unsupported mode. `DerivativeProduct::primal_operands` maps every
