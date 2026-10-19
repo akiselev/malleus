@@ -244,9 +244,18 @@ impl PreparedCall<'_, '_> {
     /// Execute without repeated binding allocation/checks. Reductions accumulate into
     /// caller-owned outputs, exactly like the interpreter; they are not reset implicitly.
     pub fn run(&mut self) {
-        // SAFETY: prepare checked lengths/uniqueness; original mutable slices remain borrowed.
-        // Validated affine maps plus check_budget bound every generated address. This borrow
-        // keeps kernel/module and all pointers alive and prevents concurrent reuse of outputs.
+        // Re-derive every pointer from the owned `&mut` slices on each call. `update_input`
+        // reborrows those slices mutably, which invalidates raw pointers derived earlier
+        // under Stacked/Tree Borrows, so the pointers cached by `prepare_owned` are only
+        // used there to detect missing operands.
+        for binding in self._bindings.iter_mut() {
+            self.pointers[binding.operand.index()] = binding.values.as_mut_ptr();
+        }
+        // SAFETY: prepare checked lengths/uniqueness; the pointers were derived just above
+        // from the original mutable slices, which remain exclusively borrowed by `self` and
+        // are not touched again until the call returns. Validated affine maps plus
+        // check_budget bound every generated address. This borrow keeps kernel/module and
+        // all pointers alive and prevents concurrent reuse of outputs.
         unsafe { (self.kernel.function)(self.pointers.as_ptr()) }
     }
 }
